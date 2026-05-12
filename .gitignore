@@ -1,0 +1,25 @@
+# API Keys — NEVER push these
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+Lib/
+venv/
+*.egg-info/
+
+# Node / Frontend build
+node_modules/
+frontend/dist/
+
+# Database & TTS cache (personal data)
+data/yashi.db
+data/tts_cache/
+
+# Logs
+logs/
+
+# OS
+.DS_Store
+Thumbs.db

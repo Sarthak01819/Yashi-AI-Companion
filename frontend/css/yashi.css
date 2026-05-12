@@ -1,0 +1,429 @@
+/* ──────────────────────────────────────────────────────────────────────────────
+   YASHI UI — Soft Organic Dark Theme
+   Fonts: Outfit (headings), Nunito (body)
+   Color palette: deep indigo + soft teal + warm cream
+────────────────────────────────────────────────────────────────────────────── */
+
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Nunito:wght@400;500;600&display=swap');
+
+:root {
+  --bg-base:       #0e0e1a;
+  --bg-surface:    #161626;
+  --bg-elevated:   #1e1e32;
+  --bg-input:      #23233a;
+  --border:        #2e2e4a;
+  --accent:        #7c6ef5;
+  --accent-soft:   #9b8ef7;
+  --accent-glow:   #7c6ef530;
+  --teal:          #4ecdc4;
+  --teal-soft:     #7eddd8;
+  --cream:         #f0ece4;
+  --text-primary:  #e8e4f0;
+  --text-secondary:#9990b8;
+  --text-muted:    #5a5478;
+  --user-bubble:   #2a2450;
+  --user-border:   #4a3e8a;
+  --bot-bubble:    #1c2838;
+  --bot-border:    #2a4060;
+  --safety-bg:     #1a2a3a;
+  --safety-border: #2a5080;
+  --radius-sm:     8px;
+  --radius-md:     16px;
+  --radius-lg:     24px;
+  --radius-xl:     32px;
+  --shadow-sm:     0 2px 8px rgba(0,0,0,0.3);
+  --shadow-md:     0 8px 32px rgba(0,0,0,0.4);
+  --shadow-glow:   0 0 40px rgba(124,110,245,0.2);
+}
+
+/* ── Reset ────────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  font-family: 'Nunito', 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  overflow: hidden;
+}
+
+/* ── Layout ───────────────────────────────────────────────────────────────── */
+.app {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  grid-template-rows: 1fr;
+  height: 100vh;
+  gap: 0;
+}
+
+/* ── Sidebar ──────────────────────────────────────────────────────────────── */
+.sidebar {
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 28px 20px;
+  gap: 20px;
+  overflow: hidden;
+}
+
+.yashi-brand {
+  font-family: 'Outfit', 'Segoe UI', system-ui, sans-serif;
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--accent-soft);
+  letter-spacing: 0.05em;
+  text-align: center;
+}
+
+.yashi-tagline {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin-top: -12px;
+}
+
+/* ── Avatar Container ─────────────────────────────────────────────────────── */
+.avatar-container {
+  position: relative;
+  width: 180px;
+  height: 200px;
+  margin: 10px 0;
+}
+
+.avatar-glow {
+  position: absolute;
+  inset: -20px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, var(--accent-glow) 0%, transparent 70%);
+  transition: background 600ms ease;
+  pointer-events: none;
+}
+
+.avatar-svg {
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 8px 24px rgba(124,110,245,0.3));
+}
+
+/* ── Status ───────────────────────────────────────────────────────────────── */
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: background 300ms;
+  flex-shrink: 0;
+}
+.status-dot[data-state="connected"]    { background: var(--teal); box-shadow: 0 0 8px var(--teal); }
+.status-dot[data-state="connecting"]   { background: #f0a868; animation: pulse 1s infinite; }
+.status-dot[data-state="listening"]    { background: #ff9ff3; animation: pulse 0.6s infinite; }
+.status-dot[data-state="thinking"]     { background: var(--accent-soft); animation: pulse 0.8s infinite; }
+.status-dot[data-state="disconnected"] { background: #ff6b6b; }
+.status-dot[data-state="error"]        { background: #ff6b6b; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.5; transform: scale(0.85); }
+}
+
+/* ── Badges ───────────────────────────────────────────────────────────────── */
+.badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.badge {
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: capitalize;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  transition: all 300ms;
+}
+
+#emotion-badge[data-emotion="happy"],
+#emotion-badge[data-emotion="joyful"]    { background: #2a2010; border-color: #ffd93d60; color: #ffd93d; }
+#emotion-badge[data-emotion="sad"]       { background: #101a2a; border-color: #6c9bd160; color: #6c9bd1; }
+#emotion-badge[data-emotion="distressed"]{ background: #2a1010; border-color: #ff6b6b60; color: #ff6b6b; }
+#emotion-badge[data-emotion="content"]   { background: #182010; border-color: #c3f58460; color: #c3f584; }
+#emotion-badge[data-emotion="excited"]   { background: #2a1020; border-color: #ff9ff360; color: #ff9ff3; }
+
+#mode-badge[data-mode="support"] { background: #101828; border-color: #4ecdc460; color: #4ecdc4; }
+#mode-badge[data-mode="deep"]    { background: #1a1030; border-color: #9b8ef760; color: #9b8ef7; }
+#mode-badge[data-mode="light"]   { background: #201a10; border-color: #f0a86860; color: #f0a868; }
+
+/* ── Sidebar actions ──────────────────────────────────────────────────────── */
+.sidebar-actions {
+  margin-top: auto;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sidebar-btn {
+  width: 100%;
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-family: 'Nunito', 'Segoe UI', system-ui, sans-serif;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 200ms;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sidebar-btn:hover {
+  background: var(--user-bubble);
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+/* ── Chat panel ───────────────────────────────────────────────────────────── */
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg-base);
+}
+
+.chat-header {
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: var(--bg-surface);
+}
+
+.chat-title {
+  font-family: 'Outfit', 'Segoe UI', system-ui, sans-serif;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* ── Chat log ─────────────────────────────────────────────────────────────── */
+#chat-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  scroll-behavior: smooth;
+}
+
+#chat-log::-webkit-scrollbar { width: 4px; }
+#chat-log::-webkit-scrollbar-track { background: transparent; }
+#chat-log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+/* ── Messages ─────────────────────────────────────────────────────────────── */
+.message {
+  display: flex;
+  max-width: 75%;
+  animation: msgIn 200ms ease-out;
+}
+@keyframes msgIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.message.user {
+  align-self: flex-end;
+  justify-content: flex-end;
+}
+
+.message.assistant {
+  align-self: flex-start;
+}
+
+.bubble {
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  font-size: 0.92rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.message.user .bubble {
+  background: var(--user-bubble);
+  border: 1px solid var(--user-border);
+  border-bottom-right-radius: var(--radius-sm);
+  color: var(--cream);
+}
+
+.message.assistant .bubble {
+  background: var(--bot-bubble);
+  border: 1px solid var(--bot-border);
+  border-bottom-left-radius: var(--radius-sm);
+  color: var(--text-primary);
+}
+
+.message.assistant.streaming .bubble {
+  border-color: var(--accent);
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+
+/* Emotion-tinted assistant messages */
+.message.assistant[data-emotion="sad"] .bubble      { border-color: #6c9bd140; }
+.message.assistant[data-emotion="distressed"] .bubble { border-color: #ff6b6b40; }
+.message.assistant[data-emotion="happy"] .bubble    { border-color: #ffd93d40; }
+.message.assistant[data-emotion="joyful"] .bubble   { border-color: #ff6b9d40; }
+
+/* ── Safety note ──────────────────────────────────────────────────────────── */
+.safety-note {
+  align-self: center;
+  background: var(--safety-bg);
+  border: 1px solid var(--safety-border);
+  border-radius: var(--radius-md);
+  padding: 12px 18px;
+  font-size: 0.85rem;
+  color: var(--teal-soft);
+  max-width: 80%;
+  line-height: 1.6;
+  animation: msgIn 300ms ease-out;
+}
+
+/* ── Typing indicator ─────────────────────────────────────────────────────── */
+#typing-indicator {
+  display: none;
+  align-self: flex-start;
+  gap: 5px;
+  padding: 12px 16px;
+  background: var(--bot-bubble);
+  border: 1px solid var(--bot-border);
+  border-radius: var(--radius-md);
+  border-bottom-left-radius: var(--radius-sm);
+}
+
+.typing-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  animation: typingBounce 1.2s infinite;
+}
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes typingBounce {
+  0%, 80%, 100% { transform: translateY(0); background: var(--text-muted); }
+  40%           { transform: translateY(-6px); background: var(--accent-soft); }
+}
+
+/* ── Input area ───────────────────────────────────────────────────────────── */
+.input-area {
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-surface);
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+#text-input {
+  flex: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 12px 18px;
+  color: var(--text-primary);
+  font-family: 'Nunito', 'Segoe UI', system-ui, sans-serif;
+  font-size: 0.92rem;
+  resize: none;
+  min-height: 48px;
+  max-height: 160px;
+  transition: border-color 200ms;
+  outline: none;
+}
+#text-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+#text-input::placeholder { color: var(--text-muted); }
+
+.icon-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 1.2rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 200ms;
+}
+.icon-btn:hover { background: var(--user-bubble); border-color: var(--accent); color: var(--accent-soft); }
+
+#send-btn {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+#send-btn:hover { background: var(--accent-soft); transform: scale(1.05); }
+
+#mic-btn.active {
+  background: #ff6b9d30;
+  border-color: #ff6b9d;
+  color: #ff6b9d;
+  animation: pulse 0.8s infinite;
+}
+
+/* ── Reflection toast ─────────────────────────────────────────────────────── */
+.reflection-toast {
+  position: fixed;
+  bottom: 100px;
+  right: 24px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  padding: 12px 18px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  max-width: 300px;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: all 400ms ease;
+  z-index: 100;
+  box-shadow: var(--shadow-md), var(--shadow-glow);
+}
+.reflection-toast.show { opacity: 1; transform: translateY(0); }
+
+/* ── Avatar SVG Animations ────────────────────────────────────────────────── */
+@keyframes breathe {
+  0%, 100% { transform: scaleY(1); }
+  50%       { transform: scaleY(1.015); }
+}
+
+/* ── Responsive ───────────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .app { grid-template-columns: 1fr; }
+  .sidebar { display: none; }
+}
