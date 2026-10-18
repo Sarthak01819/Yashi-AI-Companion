@@ -41,15 +41,6 @@ def get_all_sessions() -> List[str]:
         return [r[0] for r in cur.fetchall()]
 
 
-def count_today_messages(session_id: str) -> int:
-    midnight = time.time() - (time.time() % 86400)
-    with db_cursor() as cur:
-        cur.execute(
-            "SELECT COUNT(*) FROM conversations WHERE session_id=? AND timestamp >= ?",
-            (session_id, midnight),
-        )
-        return cur.fetchone()[0]
-
 
 def get_messages_since(timestamp: float, session_id: Optional[str] = None) -> List[Dict]:
     with db_cursor() as cur:

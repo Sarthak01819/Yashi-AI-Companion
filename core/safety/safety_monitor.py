@@ -3,15 +3,13 @@ Safety monitor — detects unhealthy attachment patterns, over-reliance, and
 ensures Yashi never behaves manipulatively.
 """
 
+import re
 import time
 import logging
 from typing import Dict, Optional
 
 from core.memory.database import db_cursor
-from config.settings import (
-    DAILY_SESSION_SOFT_LIMIT_HOURS,
-    DAILY_SESSION_HARD_LIMIT_HOURS,
-)
+from config.settings import DAILY_SESSION_HARD_LIMIT_HOURS
 
 logger = logging.getLogger(__name__)
 
@@ -113,10 +111,38 @@ def check_message(user_text: str, emotion_state: Dict, session_id: str) -> Dict:
     return {"should_respond": True, "safety_note": None, "severity": "none"}
 
 
+# Emoji, pictographs, dingbats, flags, skin tones, ZWJ and variation selectors.
+_EMOJI = re.compile(
+    "["
+    "🀀-🫿"   # pictographs, emoticons, transport, symbols & pictographs ext.
+    "☀-➿"   # misc symbols + dingbats
+    "⬀-⯿"   # arrows/stars like ⭐
+    "🇦-🇿"   # flags
+    "️‍"    # variation selector-16, zero-width joiner
+    "🏻-🏿"   # skin tones
+    "⃣"               # keycap
+    "]+"
+)
+
+
+# Markdown emphasis markers ("**yes**", "__so__") — the chat shows raw text and
+# the voice would read them out.
+_EMPHASIS = re.compile(r"\*+|(?<!\w)_{2,}|_{2,}(?!\w)")
+
+
+def strip_emojis(text: str) -> str:
+    """
+    Yashi talks like a person texting: no emojis, no markdown emphasis.
+    Safe to call on streamed tokens as well as on whole replies.
+    """
+    return _EMPHASIS.sub("", _EMOJI.sub("", text))
+
+
 def filter_response(response: str) -> str:
     """
     Post-process Yashi's generated response to remove any manipulative language.
     """
+    response = re.sub(r"[ 	]{2,}", " ", strip_emojis(response)).strip()
     leaked_markers = [
         "=== Relevant memories ===",
         "INTERNAL MEMORY CONTEXT",

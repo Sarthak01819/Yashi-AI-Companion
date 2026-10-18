@@ -53,18 +53,15 @@ COGNITIVE_MODE_INSTRUCTIONS = {
 }
 
 
-def build_prompt(
-    user_message: str,
-    conversation_history: List[Dict],
+def build_system_prompt(
     semantic_memories: List[tuple],
     personal_facts: List[Dict],
     recent_reflections: List[Dict],
     emotion_state: Dict,
-    cognitive_mode: str = "standard",
-) -> tuple[str, str]:
-    """
-    Returns (system_prompt, user_prompt) for Ollama /api/generate.
-    """
+    cognitive_mode: str,
+    user_message: str,
+) -> str:
+    """Persona + emotional context + memory, shared by every backend."""
     emotion = emotion_state.get("current_emotion", "neutral")
     tone_instruction = EMOTION_TONE_MAP.get(emotion, EMOTION_TONE_MAP["neutral"])
     mode_instruction = COGNITIVE_MODE_INSTRUCTIONS.get(cognitive_mode, "")
@@ -106,7 +103,25 @@ def build_prompt(
             memory_lines.append(f"- {content}")
         system_parts.append("\n" + "\n".join(memory_lines))
 
-    system_prompt = "\n".join(system_parts)
+    return "\n".join(system_parts)
+
+
+def build_prompt(
+    user_message: str,
+    conversation_history: List[Dict],
+    semantic_memories: List[tuple],
+    personal_facts: List[Dict],
+    recent_reflections: List[Dict],
+    emotion_state: Dict,
+    cognitive_mode: str = "standard",
+) -> tuple[str, str]:
+    """
+    Returns (system_prompt, user_prompt) — completion style, for Ollama /api/generate.
+    """
+    system_prompt = build_system_prompt(
+        semantic_memories, personal_facts, recent_reflections,
+        emotion_state, cognitive_mode, user_message,
+    )
 
     parts = []
 
@@ -119,3 +134,34 @@ def build_prompt(
 
     user_prompt = "\n".join(parts)
     return system_prompt, user_prompt
+
+
+def build_chat_messages(
+    user_message: str,
+    conversation_history: List[Dict],
+) -> List[Dict]:
+    """
+    Returns a proper chat turn list for the Anthropic / OpenAI message APIs.
+    Consecutive same-role turns are merged and the list always ends on the user.
+    """
+    messages: List[Dict] = []
+
+    for msg in conversation_history[-MAX_CONTEXT_MESSAGES:]:
+        role = "user" if msg.get("role") == "user" else "assistant"
+        content = (msg.get("content") or "").strip()
+        if not content:
+            continue
+        if messages and messages[-1]["role"] == role:
+            messages[-1]["content"] += f"\n{content}"
+        else:
+            messages.append({"role": role, "content": content})
+
+    while messages and messages[0]["role"] != "user":
+        messages.pop(0)
+
+    if messages and messages[-1]["role"] == "user":
+        messages[-1]["content"] += f"\n{user_message}"
+    else:
+        messages.append({"role": "user", "content": user_message})
+
+    return messages

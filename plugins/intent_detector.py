@@ -5,6 +5,9 @@ Trailing punctuation is stripped from targets so "Open Spotify." works correctly
 import re
 from typing import Optional
 
+# Something that actually looks like a file: name.ext, optionally with a path.
+_FILENAME = r"[\w .\-/\\:]{1,60}\.\w{1,6}"
+
 INTENT_PATTERNS = {
     "app_control": [
         r"(?:play\s+)?(?:the\s+)?(next|previous|last)\s+(?:song|track)",
@@ -19,8 +22,10 @@ INTENT_PATTERNS = {
         r"play (.+?) by (.+)",
         r"search (?:for )?(?:song|music|track) (.+?) (?:on|in) spotify",
         r"play (.+?) song",
-        r"put on (.+)",
-        r"play (.+)",
+        r"^put on (?:some )?(.+)$",
+        # Anchored: the whole message must be "play <something>", so
+        # "can you play devil's advocate for a second" is left to the LLM.
+        r"^play (.+)$",
     ],
     "youtube_search": [
         r"open (?:youtube|you tube) (?:and )?search (?:for )?(.+)",
@@ -31,10 +36,13 @@ INTENT_PATTERNS = {
         r"open (.+?) (?:on|in) (?:the )?(?:browser|web|internet)$",
         r"open (?:website|site) (.+)$",
     ],
+    # Anchored + short targets only. "start learning python" or "open up about
+    # how you feel" must reach the LLM, not the app launcher. The launcher also
+    # verifies the target resolves to a real app before claiming the message.
     "open_app": [
-        r"open (?:the )?(.+?)(?:\s+app)?$",
-        r"launch (.+)",
-        r"start (.+)",
+        r"^open (?:the )?([\w.+\- ]{2,28}?)(?: app)?$",
+        r"^launch (?:the )?([\w.+\- ]{2,28}?)(?: app)?$",
+        r"^start (?:the )?([\w.+\- ]{2,28}?)(?: app)?$",
     ],
     "open_url": [
         r"search (?:the web|google|online|for|about) (?:for |about )?(.*)",
@@ -49,26 +57,32 @@ INTENT_PATTERNS = {
         r"write (?:a )?(?:new )?file (.+)",
         r"save (?:a )?(?:new )?file (?:called |named )?(.+)",
     ],
+    # The second capture group must look like a real filename, otherwise
+    # everyday phrases ("save money to buy a car", "add some spice to my life")
+    # would be treated as file commands.
     "file_write": [
         r"write (.+?) to (?:the )?file (.+)",
-        r"write (.+?) (?:in|into) (.+)",
-        r"save (.+?) to (.+)",
-        r"put (.+?) (?:in|into) (.+)",
-        r"overwrite (.+?) with (.+)",
-        r"update (.+?) with (.+)",
+        r"^write (.+?) (?:in|into) (" + _FILENAME + r")$",
+        r"^save (.+?) to (?:the )?file (.+)$",
+        r"^save (.+?) to (" + _FILENAME + r")$",
+        r"^put (.+?) (?:in|into) (" + _FILENAME + r")$",
+        r"^overwrite (" + _FILENAME + r") with (.+)$",
+        r"^update (" + _FILENAME + r") with (.+)$",
     ],
     "file_append": [
         r"append (.+?) to (?:the )?file (.+)",
-        r"add (.+?) to (.+)",
+        r"^append (.+?) to (" + _FILENAME + r")$",
+        r"^add (.+?) to (?:the )?file (.+)$",
+        r"^add (.+?) to (" + _FILENAME + r")$",
     ],
     "find_file": [
         r"find (?:the )?file (.+)",
         r"where is (?:my )?(.+\.(?:pdf|docx|txt|py|js|mp3|mp4|png|jpg|zip))",
-        r"locate (.+)",
+        r"^locate ([\w.\-*& ]{2,40})$",
     ],
     "open_folder": [
         r"open (?:the )?(?:folder|directory|dir)\s+(.+)",
-        r"navigate to (?:the )?(?:folder|directory)?\s*(.+)",
+        r"navigate to (?:the )?(?:folder|directory)\s+(.+)",
         r"go to (?:the )?(?:folder|directory)\s+(.+)",
         r"find (?:the )?(?:folder|directory)\s+(.+)",
         r"where is (?:my )?(.+) folder",

@@ -53,7 +53,3 @@ async def dispatch(text: str, context: dict) -> dict:
             logger.warning("Plugin %s error: %s", plugin.name, e)
 
     return {"success": False, "message": "", "data": None}
-
-
-def get_plugins() -> List[YashiPlugin]:
-    return _loaded_plugins

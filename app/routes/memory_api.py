@@ -48,8 +48,7 @@ def get_narrative_thread(session_id: str, limit: int = 10):
 async def debug_ollama():
     """Check Ollama status and show available models — visit this in browser to diagnose."""
     from core.llm.ollama_client import get_ollama_client
-    from core.llm.model_router import get_available_models, select_model
-    import httpx
+    from core.llm.model_router import select_model
 
     client = get_ollama_client()
     is_up = await client.is_available()

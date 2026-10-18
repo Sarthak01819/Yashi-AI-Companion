@@ -3,27 +3,27 @@
 @source "../index.html";
 
 @theme {
-  --font-sans: "Segoe UI", system-ui, sans-serif;
-  --color-yashi-shell: #0e0e1a;
-  --color-yashi-sidebar: #161626;
-  --color-yashi-panel: #1e1e32;
-  --color-yashi-border: #2e2e4a;
-  --color-yashi-muted: #9990b8;
-  --color-yashi-brand: #9b8ef7;
-  --color-yashi-brand-strong: #7c6ef5;
-  --color-yashi-input: #23233a;
-  --color-yashi-user: #2a2450;
-  --color-yashi-user-border: #4a3e8a;
-  --color-yashi-bot: #1c2838;
-  --color-yashi-bot-border: #2a4060;
-  --color-yashi-teal: #4ecdc4;
-  --color-yashi-pink: #ff9ff3;
-  --color-yashi-rose: #ff6b9d;
-  --color-yashi-warn: #f0a868;
-  --color-yashi-danger: #ff6b6b;
-  --color-yashi-safety-bg: #101828;
-  --color-yashi-safety-border: #2a5080;
-  --color-yashi-safety-text: #7eddd8;
+  --font-sans: "M PLUS Rounded 1c", "Segoe UI", "Yu Gothic UI", "Meiryo", system-ui, sans-serif;
+  --color-yashi-shell: #fbf6f6;
+  --color-yashi-sidebar: #ffffff;
+  --color-yashi-panel: #fff1f3;
+  --color-yashi-border: #f0d2d7;
+  --color-yashi-muted: #8a6870;
+  --color-yashi-brand: #c8102e;
+  --color-yashi-brand-strong: #a30d25;
+  --color-yashi-input: #ffffff;
+  --color-yashi-user: #b3122e;
+  --color-yashi-user-border: #8e0e24;
+  --color-yashi-bot: #ffffff;
+  --color-yashi-bot-border: #ecd2d6;
+  --color-yashi-teal: #2e9e6b;
+  --color-yashi-pink: #c2185b;
+  --color-yashi-rose: #c8102e;
+  --color-yashi-warn: #c76a14;
+  --color-yashi-danger: #c8102e;
+  --color-yashi-safety-bg: #fff4f5;
+  --color-yashi-safety-border: #f3c2ca;
+  --color-yashi-safety-text: #8e1b2e;
   --color-yashi-avatar: #f7e6cf;
 }
 
@@ -35,7 +35,7 @@
   }
 
   body {
-    @apply overflow-hidden bg-yashi-shell font-sans text-[#e8e4f0];
+    @apply overflow-hidden bg-yashi-shell font-sans text-[#2b1a1d];
   }
 
   button,
@@ -62,26 +62,15 @@
   80%,
   100% {
     transform: translateY(0);
-    background: #5a5478;
+    background: #e3b5bd;
   }
 
   40% {
     transform: translateY(-5px);
-    background: #9b8ef7;
+    background: #c8102e;
   }
 }
 
-@keyframes yashi-fade-up {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
 
 .yashi-scrollbar::-webkit-scrollbar {
   width: 3px;
@@ -89,5 +78,5 @@
 
 .yashi-scrollbar::-webkit-scrollbar-thumb {
   border-radius: 9999px;
-  background: #2e2e4a;
+  background: #f0d2d7;
 }

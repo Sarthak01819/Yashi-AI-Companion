@@ -4,7 +4,6 @@ Computes RMS energy and zero-crossing rate from raw PCM audio frames.
 """
 
 import numpy as np
-from typing import Optional
 
 
 def compute_energy(audio_np: np.ndarray) -> float:

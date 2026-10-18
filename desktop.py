@@ -15,7 +15,7 @@ import os
 import sys
 import time
 import threading
-import subprocess
+
 from pathlib import Path
 
 # ── Ensure we're in the right directory ───────────────────────────────────────
@@ -31,7 +31,8 @@ try:
 except ImportError:
     pass
 
-from config.settings import HOST, PORT
+from config.settings import PORT, FRONTEND_URL
+from run import start_frontend, stop
 
 
 def start_server():
@@ -47,10 +48,9 @@ def start_server():
     )
 
 
-def wait_for_server(timeout: int = 15) -> bool:
-    """Wait until the server is accepting connections."""
+def wait_for(url: str, timeout: int = 15) -> bool:
+    """Wait until a server answers at `url`."""
     import urllib.request
-    url = f"http://127.0.0.1:{PORT}/health"
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
@@ -86,9 +86,18 @@ def main():
     server_thread.start()
 
     # Wait for server to be ready
-    if not wait_for_server(timeout=20):
+    if not wait_for(f"http://127.0.0.1:{PORT}/health", timeout=20):
         print("ERROR: Server did not start in time.")
         print("Check the terminal for errors above.")
+        input("Press Enter to exit...")
+        sys.exit(1)
+
+    # The window shows the one Yashi frontend (Vite app in frontend/).
+    print("Starting Yashi frontend...")
+    frontend = start_frontend()
+    if not wait_for(FRONTEND_URL, timeout=60):
+        stop(frontend)
+        print("ERROR: Frontend did not start. Is Node.js installed?")
         input("Press Enter to exit...")
         sys.exit(1)
 
@@ -96,9 +105,9 @@ def main():
     print()
 
     # Create the native window
-    window = webview.create_window(
+    webview.create_window(
         title       = "Yashi — AI Companion",
-        url         = f"http://127.0.0.1:{PORT}",
+        url         = FRONTEND_URL,
         width       = 1280,
         height      = 800,
         min_size    = (900, 600),
@@ -113,6 +122,7 @@ def main():
         private_mode   = False,   # keep localStorage etc.
     )
 
+    stop(frontend)
     print("Yashi closed. Goodbye!")
 
 

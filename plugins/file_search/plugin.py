@@ -2,8 +2,6 @@
 File Search Plugin — searches for files on the local filesystem.
 """
 
-import os
-import re
 import fnmatch
 import logging
 from pathlib import Path

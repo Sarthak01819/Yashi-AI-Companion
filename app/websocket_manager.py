@@ -4,7 +4,7 @@ WebSocket connection manager — handles multiple concurrent clients.
 
 import logging
 import json
-from typing import Dict, Set
+from typing import Dict
 from fastapi import WebSocket
 
 logger = logging.getLogger(__name__)
@@ -32,15 +32,6 @@ class ConnectionManager:
                 logger.warning("WS send error [%s]: %s", client_id, e)
                 self.disconnect(client_id)
 
-    async def broadcast(self, data: dict) -> None:
-        disconnected = []
-        for cid, ws in list(self.active.items()):
-            try:
-                await ws.send_text(json.dumps(data))
-            except Exception:
-                disconnected.append(cid)
-        for cid in disconnected:
-            self.disconnect(cid)
 
 
 manager = ConnectionManager()

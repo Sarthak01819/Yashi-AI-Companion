@@ -32,12 +32,3 @@ def select_cognitive_mode(user_text: str, emotion_state: Dict) -> str:
 
     return text_mode
 
-
-def describe_mode(mode: str) -> str:
-    descriptions = {
-        "light":    "Quick task response",
-        "standard": "Natural conversation",
-        "deep":     "Thoughtful, nuanced exploration",
-        "support":  "Empathetic emotional support",
-    }
-    return descriptions.get(mode, "Standard response")

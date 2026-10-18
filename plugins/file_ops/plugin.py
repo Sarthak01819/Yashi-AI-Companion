@@ -163,7 +163,6 @@ class Plugin(YashiPlugin):
         intent = intent_data.get("intent", "")
         target = intent_data.get("target", "").strip()
         extra  = intent_data.get("extra", "").strip()
-        tl = text.lower()
 
         # ── Create file ───────────────────────────────────────────────────────
         if intent == "file_create":

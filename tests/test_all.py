@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import pytest, asyncio, numpy as np, tempfile
+import pytest, asyncio, numpy as np
 
 def run(coro): return asyncio.get_event_loop().run_until_complete(coro)
 
@@ -98,18 +98,6 @@ def test_filter_response():
     from core.safety.safety_monitor import filter_response
     assert "you need me" not in filter_response("Here to support you.").lower()
 
-# ── VAD ────────────────────────────────────────────────────────────────────────
-def test_vad_silence():
-    from core.voice.vad import SimpleVAD
-    vad = SimpleVAD()
-    r = vad.process_chunk(np.zeros(1600, dtype=np.int16))
-    assert not r["speech_detected"] and not r["end_of_speech"]
-
-def test_vad_speech():
-    from core.voice.vad import SimpleVAD
-    vad = SimpleVAD()
-    assert vad.process_chunk((np.ones(1600)*5000).astype(np.int16))["speech_detected"]
-
 # ── Intent / Plugin ────────────────────────────────────────────────────────────
 def test_intent_open_app():
     from plugins.intent_detector import detect_intent
@@ -198,6 +186,23 @@ def test_model_router_with_models():
     from core.llm.model_router import select_model, set_available_models
     set_available_models(["phi3:mini","mistral:7b-instruct-v0.2-q4_K_M"])
     assert "phi3" in select_model("light")
+
+# ── Reply cleanup ─────────────────────────────────────────────────────────────
+def test_strip_emojis_and_emphasis():
+    from core.safety.safety_monitor import filter_response
+    assert filter_response("**YESSS!** that’s amazing 🎉") == "YESSS! that’s amazing"
+    assert filter_response("café résumé — fine") == "café résumé — fine"
+    assert filter_response("snake_case_name stays") == "snake_case_name stays"
+
+def test_strip_emojis_streamed_tokens():
+    from core.safety.safety_monitor import strip_emojis
+    assert "".join(strip_emojis(t) for t in ["**", "YES", "S!*", "*", " 👍🏽"]) == "YESS! "
+
+# ── TTS file serving must not escape the cache folder ────────────────────────
+def test_tts_serve_blocks_traversal():
+    from app.routes.tts_serve import serve_tts
+    for name in ["../../.env", r"..\..\.env", "../yashi.db", "missing.mp3"]:
+        assert serve_tts(name).status_code == 404
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

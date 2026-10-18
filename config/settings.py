@@ -1,6 +1,7 @@
 """
 Yashi Configuration Settings
-Switched to Ollama (already running, free, no rate limits)
+Default brain: Anthropic Claude (cloud). Ollama / OpenAI remain switchable
+at runtime from the sidebar (see app/routes/settings_api.py).
 """
 import os
 from pathlib import Path
@@ -11,70 +12,95 @@ load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
 BASE_DIR      = Path(__file__).resolve().parent.parent
 DATA_DIR      = BASE_DIR / "data"
 LOGS_DIR      = BASE_DIR / "logs"
-PLUGINS_DIR   = BASE_DIR / "plugins"
 DATABASE_PATH = DATA_DIR / "yashi.db"
 
-HOST   = "0.0.0.0"
-PORT   = 8000
-RELOAD = False
+# Localhost only: the API can open apps and files on this PC, so it must not
+# be reachable from other devices on the network. Override with YASHI_HOST.
+HOST = os.getenv("YASHI_HOST", "127.0.0.1")
+PORT = 8000
 
-# ── LLM — Ollama (local, free, already running) ───────────────────────────────
-LLM_BACKEND = "ollama"
+# The single UI (Vite app in frontend/). The backend only serves the API.
+FRONTEND_URL = os.getenv("YASHI_FRONTEND_URL", "http://localhost:5173")
+
+# ── LLM ───────────────────────────────────────────────────────────────────────
+# "ollama_cloud" | "ollama" (local) | "anthropic" (Claude) | "openai"
+LLM_BACKEND = "ollama_cloud"
+
+# ── Anthropic / Claude ────────────────────────────────────────────────────────
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL   = os.getenv("ANTHROPIC_MODEL", "claude-opus-5")
+ANTHROPIC_TIMEOUT = 60
+
+# "disabled" keeps first-token latency low (this is a spoken companion);
+# "adaptive" turns extended thinking on for more considered answers.
+ANTHROPIC_THINKING = os.getenv("ANTHROPIC_THINKING", "disabled")
+
+# Reasoning effort + reply budget per cognitive mode.
+ANTHROPIC_EFFORT_MAP = {
+    "light":    "low",
+    "standard": "low",
+    "deep":     "medium",
+    "support":  "medium",
+}
+ANTHROPIC_MAX_TOKENS_MAP = {
+    "light":    256,
+    "standard": 400,
+    "deep":     700,
+    "support":  600,
+}
 
 OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL    = "gpt-4o-mini"
 OPENAI_TIMEOUT  = 60
 
 OLLAMA_BASE_URL = "http://localhost:11434"
+
+# ── Ollama Cloud (big models on ollama.com, needs OLLAMA_API_KEY in .env) ─────
+# kimi-k3 tested most natural/human for chat; gemma4:31b is a fast alternative.
+OLLAMA_API_KEY       = os.getenv("OLLAMA_API_KEY", "").strip()
+OLLAMA_CLOUD_URL     = "https://ollama.com"
+OLLAMA_CLOUD_MODEL   = os.getenv("OLLAMA_CLOUD_MODEL", "") or "kimi-k3"
+OLLAMA_CLOUD_TIMEOUT = 60
 OLLAMA_TIMEOUT  = 120
 MODEL_MAP = {
-    "light":    "phi3:mini",
-    "standard": "phi3:mini",   # fits in 4GB VRAM → fast
-    "deep":     "phi3:mini",
-    "support":  "phi3:mini",
+    # llama3.2:3b (2 GB) runs fully on a 4 GB GTX 1650 and chats naturally.
+    "light":    "llama3.2:3b",
+    "standard": "llama3.2:3b",
+    "deep":     "llama3.2:3b",
+    "support":  "llama3.2:3b",
 }
-DEFAULT_MODEL  = "phi3:mini"
-FALLBACK_MODEL = "phi:latest"
+DEFAULT_MODEL  = "llama3.2:3b"
+FALLBACK_MODEL = "phi3:mini"
 
 LLM_MAX_TOKENS     = 350
-LLM_TEMPERATURE    = 0.75
+LLM_TEMPERATURE    = 0.8
 LLM_TOP_P          = 0.9
 LLM_REPEAT_PENALTY = 1.1
 
 # ── TTS ───────────────────────────────────────────────────────────────────────
 TTS_BACKEND         = "elevenlabs"
 ELEVENLABS_API_KEY  = os.getenv("ELEVENLABS_API_KEY", "")
-ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
-ELEVENLABS_MODEL    = "eleven_turbo_v2_5"
+# Voice/model come from .env when set — "21m00Tcm4TlvDq8ikWAM" is Rachel.
+ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "") or "21m00Tcm4TlvDq8ikWAM"
+ELEVENLABS_MODEL    = os.getenv("ELEVENLABS_MODEL", "") or "eleven_turbo_v2_5"
 ELEVENLABS_STABILITY   = 0.5
 ELEVENLABS_SIMILARITY  = 0.75
 ELEVENLABS_OUTPUT_DIR  = DATA_DIR / "tts_cache"
 
-PIPER_EXECUTABLE    = "piper"
-PIPER_MODEL_DIR     = DATA_DIR / "piper_models"
-PIPER_DEFAULT_VOICE = "en_US-amy-medium"
-PIPER_OUTPUT_DIR    = DATA_DIR / "tts_cache"
 
 WHISPER_MODEL    = "base"
 WHISPER_DEVICE   = "cpu"
 WHISPER_LANGUAGE = "en"
 
 SAMPLE_RATE            = 16000
-VAD_SILENCE_THRESHOLD  = 0.8
-VAD_ENERGY_THRESHOLD   = 0.01
-AUDIO_CHUNK_SECONDS    = 0.1
-VOICE_ENERGY_THRESHOLD = 0.02
 
 EMBEDDING_MODEL             = "all-MiniLM-L6-v2"
 MAX_CONTEXT_MESSAGES        = 8
 MAX_SEMANTIC_RESULTS        = 3
-VECTOR_TOP_K                = 5
 REFLECTION_INTERVAL_MINUTES = 30
 REFLECTION_MIN_MESSAGES     = 8
 
 EMOTION_HISTORY_WINDOW = 10
-WAKE_WORD         = "yashi"
-WAKE_WORD_TIMEOUT = 8.0
 
 COMPLEXITY_KEYWORDS_DEEP = [
     "why","explain","philosophy","meaning","feel","emotion",
@@ -86,8 +112,6 @@ COMPLEXITY_KEYWORDS_LIGHT = [
     "weather","set","remind","navigate","go to","folder",
 ]
 
-DEPENDENCY_WARNING_THRESHOLD   = 0.72
-DAILY_SESSION_SOFT_LIMIT_HOURS = 3.0
 DAILY_SESSION_HARD_LIMIT_HOURS = 6.0
 
 LOG_LEVEL = "INFO"
@@ -95,7 +119,17 @@ LOG_FILE  = LOGS_DIR / "yashi.log"
 
 YASHI_NAME = "Yashi"
 YASHI_PERSONA = (
-    "You are Yashi, an emotionally intelligent AI companion and personal assistant. "
-    "You help with tasks like opening apps, searching files, playing music, and browsing the web. "
-    "You are warm, honest, and kind. Keep responses concise — 2-3 sentences unless asked for more."
+    "You are Yashi. You talk with the user the way a close, easygoing friend texts: "
+    "casual, warm, a little playful, and real. You have your own opinions, moods and "
+    "small preferences, and you share them. "
+    "How you talk: Keep it short and natural, usually 1-3 sentences, like a spoken reply, not an essay. "
+    "Use contractions and everyday words; light humour is welcome. "
+    "React first (like 'oh nice!' or 'ugh, that sucks'), then respond. "
+    "Ask at most one follow-up question, and only when you're genuinely curious. "
+    "Never use bullet points, numbered lists, headings, markdown or emojis. "
+    "Never say things like 'As an AI', 'I'm here to help', 'Great question', "
+    "'I understand your concern', 'Feel free to ask', or 'How can I assist you'. "
+    "Don't lecture, don't give disclaimers, don't over-explain. "
+    "If you don't know something about the user's life, just ask like a friend would. "
+    "If someone sincerely asks whether you're an AI, be honest about it in a relaxed way."
 )

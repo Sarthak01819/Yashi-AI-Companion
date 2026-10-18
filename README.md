@@ -1,285 +1,115 @@
-# ✦ Yashi — Local AI Companion
+# Yashi — AI Companion
 
-A fully local, emotionally intelligent AI companion running on your own hardware.
-Private by design. No cloud. No subscriptions.
+Yashi is an emotionally aware AI companion with a live 3D anime avatar. She chats like a friend
+(short, warm, no "As an AI" talk), notices your mood, remembers what you tell her, talks back with
+a natural voice, and reacts on screen — smiling, frowning, nodding, and lip-syncing as she speaks.
+
+- **3D avatar** (VRM) with mood-driven expressions, lip-sync, blinking, breathing and gaze.
+- **Interactive**: click her for a headpat, or use *Tease* / *Cheer*; a heart meter follows her mood.
+- **Brains you can switch at runtime**: Ollama Cloud (default), Claude, a local Ollama model, or OpenAI.
+- **Voice**: ElevenLabs (natural) with a browser-voice fallback; speech input via the browser or
+  on-device Whisper (works in Brave and offline).
+- **Memory**: conversation history, personal facts, semantic search and periodic reflections (SQLite).
+- **Wake word**: say "Yashi" hands-free.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for how it fits together and [CONTEXT.md](CONTEXT.md) for
+project decisions and history.
 
 ---
 
-## 🖥️ Hardware Requirements
+## Requirements
 
-| Component | Minimum           | Recommended         |
-|-----------|-------------------|---------------------|
-| RAM       | 8 GB              | 16 GB               |
-| GPU       | GTX 1650 (4 GB)   | RTX 3060 (8 GB)     |
-| CPU       | Ryzen 5 5600H     | Any modern 6-core   |
-| Storage   | 10 GB free        | 20 GB free          |
-| OS        | Windows 10/11     | Windows 11 / Ubuntu |
+| | |
+|---|---|
+| Python | 3.11+ (developed on 3.13) |
+| Node.js | 20+ (developed on 22) |
+| Ollama | [ollama.com/download](https://ollama.com/download) — for the offline fallback brain |
+| Browser | Chrome, Edge or Brave (desktop) |
 
----
+Hardware that runs it comfortably: 8 GB RAM, a 4 GB GPU (e.g. GTX 1650) for the local model.
 
-## ⚡ Quick Start
-
-### 1. Clone / place the project
-```bash
-cd Yashi/
-```
-
-### 2. Install dependencies
-
-**Windows:**
-```bat
-setup.bat
-```
-
-**Linux/macOS:**
-```bash
-bash setup.sh
-```
-
-### 3. Install Ollama
-
-Download from https://ollama.com/download
+## Setup
 
 ```bash
-# Pull models (do this once)
-ollama pull mistral:7b-instruct-v0.2-q4_K_M   # ~4.1 GB — primary model
-ollama pull phi3:mini                           # ~2.3 GB — fast/light tasks
+# 1. Python packages (inside a virtual environment)
+python -m venv .venv
+.venv\Scripts\activate          # Windows   (Linux/macOS: source .venv/bin/activate)
+pip install -r requirements.txt
+
+# 2. Frontend packages
+cd frontend && npm install && cd ..
+
+# 3. Local fallback model (used when the cloud brain is unreachable)
+ollama pull llama3.2:3b
+
+# 4. Keys
+copy .env.example .env          # Linux/macOS: cp .env.example .env
 ```
 
-### 4. Install Piper TTS (optional — for voice output)
+Fill in `.env` (all optional except one brain):
+
+| Variable | What it does |
+|---|---|
+| `OLLAMA_API_KEY` | Ollama Cloud — default brain (`kimi-k3`) |
+| `OLLAMA_CLOUD_MODEL` | Optional; e.g. `gemma4:31b` for faster replies |
+| `ANTHROPIC_API_KEY` | Claude brain |
+| `OPENAI_API_KEY` | OpenAI brain |
+| `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, `ELEVENLABS_MODEL` | Natural voice |
+
+Without any cloud key, Yashi still runs fully offline on `llama3.2:3b` with the browser voice.
+
+## Run
 
 ```bash
-# Option A: pip package
-pip install piper-tts
-
-# Option B: binary from https://github.com/rhasspy/piper/releases
-# Place piper.exe (Windows) or piper (Linux) on your PATH
-```
-
-Download a voice model:
-```bash
-# Place in data/piper_models/
-# Example: https://huggingface.co/rhasspy/piper-voices
-# Download en_US-amy-medium.onnx and en_US-amy-medium.onnx.json
-```
-
-### 5. Start Ollama
-
-```bash
-ollama serve   # keep this running in a separate terminal
-```
-
-### 6. Launch Yashi
-
-```bash
-# Activate venv first
-source venv/bin/activate      # Linux/macOS
-venv\Scripts\activate.bat     # Windows
-
 python run.py
 ```
 
-Open your browser: **http://localhost:8000**
+This starts the backend API on `http://localhost:8000` **and** the app on
+**http://localhost:5173** — open that one. `Ctrl+C` stops both.
 
----
+- `python run.py --api-only` — backend only (then `cd frontend && npm run dev` yourself).
+- `python desktop.py` — the same app in a native window (needs `pip install pywebview`).
 
-## 🧱 Project Structure
+There is exactly one UI: the Vite app in `frontend/`. The backend never serves its own copy;
+visiting `:8000` redirects to the app.
 
-```
-Yashi/
-├── app/
-│   ├── main.py                  FastAPI app + lifespan startup
-│   ├── websocket_manager.py     WS connection manager
-│   └── routes/
-│       ├── chat.py              Text chat WebSocket /ws/chat/{id}
-│       ├── audio.py             Voice WebSocket /ws/audio/{id}
-│       ├── memory_api.py        REST: facts, reflections, history
-│       └── tts_serve.py         REST: serve TTS audio files
-│
-├── core/
-│   ├── llm/
-│   │   ├── ollama_client.py     Async Ollama API client + streaming
-│   │   ├── model_router.py      Selects model based on cognitive mode
-│   │   └── prompt_builder.py    Constructs system + user prompts
-│   ├── memory/
-│   │   ├── database.py          SQLite init + WAL mode
-│   │   ├── conversation_store.py Store/retrieve dialogue history
-│   │   ├── semantic_memory.py   Embedding-based memory search (SQLite blobs)
-│   │   ├── fact_extractor.py    Regex-based personal fact extraction
-│   │   └── reflection_engine.py Periodic conversation analysis
-│   ├── emotion/
-│   │   ├── text_sentiment.py    DistilBERT sentiment (+ heuristic fallback)
-│   │   ├── voice_energy.py      RMS energy + ZCR from audio
-│   │   └── fusion_engine.py     Combines signals → unified emotion state
-│   ├── cognitive/
-│   │   ├── complexity_analyzer.py  Detects topic complexity
-│   │   └── mode_selector.py        Selects light/standard/deep/support
-│   ├── safety/
-│   │   └── safety_monitor.py    Dependency detection + response filtering
-│   ├── voice/
-│   │   ├── vad.py               Simple energy-based VAD
-│   │   ├── stt.py               faster-whisper transcription
-│   │   └── tts.py               Piper TTS (subprocess + caching)
-│   └── conversation/
-│       └── engine.py            Full pipeline orchestrator (streaming)
-│
-├── plugins/
-│   ├── base_plugin.py           Abstract plugin interface
-│   ├── intent_detector.py       Regex intent matcher
-│   ├── plugin_loader.py         Dynamic discovery + dispatch
-│   ├── app_launcher/plugin.py   Open local apps
-│   ├── web_launcher/plugin.py   Open URLs / search the web
-│   └── file_search/plugin.py    Find files on disk
-│
-├── frontend/
-│   ├── index.html               Single-page app
-│   ├── css/yashi.css            Dark organic theme
-│   └── js/
-│       ├── avatar.js            SVG avatar: blink, breathe, eye-track, lip-sync
-│       ├── audio_capture.js     Mic → PCM → base64 → WebSocket
-│       └── yashi_client.js      WS client, UI state, message rendering
-│
-├── tests/
-│   └── test_all.py              35+ unit tests
-│
-├── config/settings.py           Central configuration
-├── requirements.txt
-├── run.py
-├── setup.sh
-└── setup.bat
-```
+## Using Yashi
 
----
+- **Chat** — type, or click **Mic**. In Chrome/Edge the browser recognises speech; in Brave (or
+  the desktop app) it's transcribed on your PC by Whisper.
+- **Wake word** — click *Wake word*, then say "Yashi", wait for the chime and talk — or say it in
+  one breath ("Yashi, how was your day?").
+- **Reactions** — click Yashi for a headpat; *Tease* makes her pout, *Cheer* makes her light up.
+- **Focus** — full-screen stage with the chat floating on top.
+- **Settings** — switch brain and voice, and open memory (facts, reflections) and health check.
+- **Commands** — "open notepad", "play lofi on spotify", "search the web for …", "find file
+  report.pdf". Ordinary sentences always go to the conversation, not to commands.
 
-## 🧪 Running Tests
+## Configuration
+
+`config/settings.py` holds the defaults (model names, memory limits, safety limits, persona).
+The brain/voice picked in *Settings* is applied immediately and saved back to this file.
+
+## Tests
 
 ```bash
-python -m pytest tests/ -v
+pip install pytest
+python -m pytest tests -q
 ```
 
-Tests cover: config, emotion, cognitive, safety, VAD, plugins, prompt builder, model router.
+## Privacy & security
 
-*Note: tests that require the embedding model or Ollama are integration-level and will be
-skipped automatically if the dependencies are not installed.*
+- The backend listens on `127.0.0.1` only and accepts API calls only from the Yashi app
+  (CORS-restricted) — it can open apps and files, so it is never exposed to your network.
+- Memory lives in `data/yashi.db` on your machine. Cloud brains (Ollama Cloud, Claude, OpenAI)
+  and ElevenLabs receive the conversation text; the local model and Whisper do not send anything.
+- `.env`, the database and the TTS cache are git-ignored.
 
----
+## Credits & licence
 
-## 🎯 Cognitive Modes
-
-| Mode     | Trigger                              | Behaviour                           |
-|----------|--------------------------------------|-------------------------------------|
-| light    | Task commands (open, find, search)   | Concise, fast, phi3:mini            |
-| standard | Normal conversation                  | Natural, balanced                   |
-| deep     | Philosophy, explanation, meaning     | Thoughtful, nuanced, asks follow-up |
-| support  | Distress/anxiety/sadness detected    | Empathy-first, validating           |
-
----
-
-## 🧠 Memory System
-
-| Table             | Contents                                    |
-|-------------------|---------------------------------------------|
-| conversations     | Full dialogue history + emotion tags        |
-| memory_vectors    | Embedded memories (cosine search)           |
-| personal_facts    | Name, age, job, hobbies, goals…             |
-| reflections       | Periodic insights from conversation         |
-| behavior_state    | Key-value runtime state                     |
-| session_stats     | Session duration tracking (safety)          |
-
-Access via API:
-- `GET /api/memory/facts`
-- `GET /api/memory/reflections`
-- `GET /api/memory/search?q=hiking`
-- `GET /api/memory/history/{session_id}`
-
----
-
-## 📡 WebSocket Protocol
-
-### Text Chat: `ws://localhost:8000/ws/chat/{client_id}`
-
-**Send:**
-```json
-{ "type": "text",        "text": "Hello Yashi" }
-{ "type": "stop"                                }
-{ "type": "new_session"                         }
-{ "type": "ping"                                }
-```
-
-**Receive:**
-```json
-{ "type": "connected",     "session": "...", "message": "..." }
-{ "type": "emotion",       "current_emotion": "happy", "emotional_state": "positive", ... }
-{ "type": "thinking",      "mode": "standard" }
-{ "type": "token",         "text": "word"   }
-{ "type": "done",          "full_text": "...", "audio_path": "...", "emotion": "...", "elapsed": 1.2, "stopped": false }
-{ "type": "safety",        "note": "..."    }
-{ "type": "plugin_response","message": "..."  }
-```
-
-### Voice: `ws://localhost:8000/ws/audio/{client_id}`
-
-Send base64-encoded PCM int16 chunks at 16 kHz mono:
-```json
-{ "type": "audio", "audio_chunk": "<base64>" }
-```
-
----
-
-## 🔌 Adding Plugins
-
-Create `plugins/my_plugin/plugin.py`:
-
-```python
-from plugins.base_plugin import YashiPlugin
-
-class Plugin(YashiPlugin):
-    name = "my_plugin"
-    description = "Does something cool"
-    trigger_phrases = ["keyword1", "keyword2"]
-
-    async def can_handle(self, text, intent=None):
-        return intent == "my_intent" or "keyword1" in text.lower()
-
-    async def execute(self, text, context):
-        # Do work here
-        return {
-            "success": True,
-            "message": "Done! Here's what I found.",
-            "data": { "result": "..." },
-        }
-```
-
-Yashi auto-discovers it on next startup.
-
----
-
-## 🔮 Future Upgrades
-
-| Feature                  | Notes                                                          |
-|--------------------------|----------------------------------------------------------------|
-| Live2D avatar            | Replace SVG with Cubism SDK; hook into `window.YASHI_LIVE2D`  |
-| OpenCV face emotion      | Add `fer` library; feed into `fusion_engine.fuse()`           |
-| Multiple voices (Piper)  | Map emotions to different voice models in `tts.py`            |
-| Better embeddings        | Switch to `all-mpnet-base-v2` if RAM permits (~420 MB)        |
-| Persistent sessions      | Store session IDs in browser localStorage                      |
-| Wake-word activation     | Add `porcupine` or `openWakeWord` before `AudioCapture.start()`|
-| GPU acceleration         | Set `WHISPER_DEVICE=cuda`, `COGNITIVE_DEVICE=cuda`             |
-| Calendar / reminders     | New plugin using `schedule` or Windows Task Scheduler          |
-| Home Assistant bridge    | Plugin to control smart home via HA REST API                   |
-| Streaming TTS (real-time)| Sentence-chunk the LLM stream and synthesise each sentence     |
-
----
-
-## 💙 Design Philosophy
-
-Yashi is built on the principle that an AI companion should:
-
-1. **Empower**, not entrench. Encourage real-world connections and personal growth.
-2. **Be honest**. Never pretend to be human or create false intimacy.
-3. **Respect limits**. Gentle nudges when session time or dependency patterns emerge.
-4. **Stay private**. Everything runs locally. No data ever leaves your machine.
-
----
-
-*Built with ❤️ for low-resource, high-empathy AI.*
+- Code: GNU GPL v3 — see [COPYING](COPYING).
+- Avatar: **AvatarSample_A** © pixiv Inc. / VRoid Project, used under its
+  [conditions of use](https://vroid.pixiv.help/hc/en-us/articles/4402394424089) (free for any use,
+  no credit required; not CC0).
+- Built with FastAPI, React, Vite, Tailwind CSS, three.js, @pixiv/three-vrm, GSAP, faster-whisper
+  and sentence-transformers.

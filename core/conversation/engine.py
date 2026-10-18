@@ -1,14 +1,12 @@
 """
-Conversation engine v3.
-- TTS: browser fallback when ElevenLabs fails
-- Plugin responses also get TTS
-- Less repetitive (lower repeat_penalty weight handled in prompt)
+Conversation engine: one user message -> emotion, safety, memory, prompt,
+streamed LLM reply, sentence-by-sentence TTS events.
 """
 import uuid, re, time, logging, asyncio
 from typing import AsyncGenerator, Dict
 
-from config.settings import LLM_BACKEND
-from core.llm.prompt_builder import build_prompt
+import config.settings as settings
+from core.llm.prompt_builder import build_prompt, build_chat_messages
 from core.memory.conversation_store import save_message, get_recent_messages
 from core.memory.semantic_memory import search_memory, store_memory, get_all_facts
 from core.memory.fact_extractor import extract_facts
@@ -16,30 +14,32 @@ from core.memory.semantic_memory import store_fact
 from core.memory.reflection_engine import maybe_reflect, get_recent_reflections
 from core.emotion.fusion_engine import fuse as fuse_emotion
 from core.cognitive.mode_selector import select_cognitive_mode
-from core.safety.safety_monitor import check_message, filter_response
+from core.safety.safety_monitor import check_message, filter_response, strip_emojis
 from core.voice.elevenlabs_tts import synthesise, tts_backend
 
 logger = logging.getLogger(__name__)
 
 
-def _get_llm():
-    if LLM_BACKEND == "openai":
+def current_backend() -> str:
+    """Read the backend at call time so the sidebar toggle takes effect live."""
+    return getattr(settings, "LLM_BACKEND", "anthropic")
+
+
+def _get_llm(backend: str = None):
+    backend = backend or current_backend()
+    if backend == "anthropic":
+        from core.llm.anthropic_client import get_anthropic_client
+        return get_anthropic_client()
+    if backend == "ollama_cloud":
+        from core.llm.ollama_client import get_ollama_cloud_client
+        return get_ollama_cloud_client()
+    if backend == "openai":
         from core.llm.openai_client import get_openai_client
         return get_openai_client()
     from core.llm.ollama_client import get_ollama_client
     return get_ollama_client()
 
 
-def _split_sentences(text: str):
-    """Split text into speakable sentences."""
-    parts = re.split(r'(?<=[.!?])\s+', text.strip())
-    merged, buf = [], ""
-    for p in parts:
-        buf = (buf + " " + p).strip() if buf else p
-        if len(buf) >= 35:
-            merged.append(buf); buf = ""
-    if buf: merged.append(buf)
-    return merged
 
 
 def _normalise_tts_chunk(text: str, final_chunk: bool = False) -> str:
@@ -69,23 +69,35 @@ def _normalise_tts_chunk(text: str, final_chunk: bool = False) -> str:
 
 class ConversationEngine:
     def __init__(self):
-        self.llm          = _get_llm()
+        self._backend     = current_backend()
+        self.llm          = _get_llm(self._backend)
         self.session_id   = str(uuid.uuid4())
-        self._tts         = tts_backend()
         self._stop_event  = asyncio.Event()
-        self._active_response = ""
         self.emotion_state: Dict = {
             "current_emotion": "neutral",
             "emotional_trend": "neutral",
             "emotional_state": "stable",
             "valence": 0.0,
         }
-        logger.info("Engine LLM=%s TTS=%s Session=%s", LLM_BACKEND, self._tts, self.session_id)
+        logger.info("Engine LLM=%s TTS=%s Session=%s",
+                    self._backend, self._tts, self.session_id)
+
+    @property
+    def _tts(self) -> str:
+        """Resolved at read time so the TTS toggle applies without a reconnect."""
+        return tts_backend()
+
+    def _sync_backend(self) -> None:
+        """Pick up a runtime LLM backend switch before the next generation."""
+        backend = current_backend()
+        if backend != self._backend:
+            logger.info("LLM backend switched: %s -> %s", self._backend, backend)
+            self._backend = backend
+            self.llm = _get_llm(backend)
 
     def new_session(self) -> str:
         self.request_stop()
         self.session_id = str(uuid.uuid4())
-        self._active_response = ""
         return self.session_id
 
     def request_stop(self) -> None:
@@ -94,41 +106,12 @@ class ConversationEngine:
     def clear_stop(self) -> None:
         self._stop_event.clear()
 
-    def get_partial_response(self) -> str:
-        return self._active_response
 
-    async def speak(self, text: str, emotion: str, tts_backend_override: str = None):
-        """Yield tts_sentence events for a block of text."""
-        backend = tts_backend_override or self._tts
-        sentences = _split_sentences(text)
-        events = []
-
-        if backend == "browser":
-            for s in sentences:
-                events.append({"type": "tts_sentence", "text": s,
-                               "audio_path": None, "emotion": emotion})
-        elif backend == "elevenlabs":
-            # Synthesise all in parallel
-            tasks = [asyncio.create_task(synthesise(s, emotion)) for s in sentences]
-            for s, task in zip(sentences, tasks):
-                try:
-                    path = await asyncio.wait_for(task, timeout=15)
-                    if path:
-                        events.append({"type": "tts_sentence", "text": s,
-                                       "audio_path": str(path), "emotion": emotion})
-                    else:
-                        # ElevenLabs failed → browser fallback
-                        events.append({"type": "tts_sentence", "text": s,
-                                       "audio_path": None, "emotion": emotion})
-                except Exception:
-                    events.append({"type": "tts_sentence", "text": s,
-                                   "audio_path": None, "emotion": emotion})
-        return events
 
     async def process_message(self, user_text: str, audio_np=None) -> AsyncGenerator[Dict, None]:
         t0 = time.time()
         self.clear_stop()
-        self._active_response = ""
+        self._sync_backend()
 
         self.emotion_state = fuse_emotion(user_text, audio_np)
         yield {"type": "emotion", **self.emotion_state}
@@ -160,6 +143,8 @@ class ConversationEngine:
             emotion_state=self.emotion_state,
             cognitive_mode=mode,
         )
+        # Chat-shaped history for message-based backends (Claude / OpenAI).
+        chat_messages = build_chat_messages(user_text, history[:-1])
 
         full_response = ""
         sentence_buf  = ""
@@ -177,15 +162,18 @@ class ConversationEngine:
             return bool(s) and s[-1] in ",;:"
 
         try:
-            async for token in self.llm.generate_stream(
-                prompt=user_prompt, system=system_prompt, mode=mode
+            async for token in self._stream_with_fallback(
+                prompt=user_prompt, system=system_prompt, mode=mode,
+                messages=chat_messages,
             ):
                 if self._stop_event.is_set():
                     stopped = True
                     break
 
+                token = strip_emojis(token)
+                if not token:
+                    continue
                 full_response  += token
-                self._active_response = full_response
                 sentence_buf   += token
                 yield {"type": "token", "text": token}
 
@@ -229,7 +217,6 @@ class ConversationEngine:
                 logger.error("LLM error: %s", e)
                 msg = self._error_msg(e)
                 full_response = msg
-                self._active_response = full_response
                 yield {"type": "token", "text": msg}
 
         if self._stop_event.is_set():
@@ -251,7 +238,6 @@ class ConversationEngine:
                 task.cancel()
 
             full_response = filter_response(full_response.strip())
-            self._active_response = full_response
 
             if full_response:
                 save_message(self.session_id, "assistant", full_response,
@@ -274,7 +260,6 @@ class ConversationEngine:
             return
 
         full_response = filter_response(full_response)
-        self._active_response = full_response
 
         # Collect ElevenLabs results — always fall back to browser on failure
         for sent_text, task in tts_tasks:
@@ -302,12 +287,48 @@ class ConversationEngine:
 
         asyncio.create_task(self._reflect())
 
+    async def _stream_with_fallback(self, **kwargs):
+        """
+        Stream from the active backend. If Ollama Cloud fails before saying
+        anything (offline, usage cap, outage), answer with the local model.
+        """
+        produced = False
+        try:
+            async for token in self.llm.generate_stream(**kwargs):
+                produced = True
+                yield token
+        except Exception as e:
+            if self._backend != "ollama_cloud" or produced or self._stop_event.is_set():
+                raise
+            logger.warning("Ollama Cloud failed (%s) — answering with local %s",
+                           e, settings.DEFAULT_MODEL)
+            from core.llm.ollama_client import get_ollama_client
+            async for token in get_ollama_client().generate_stream(**kwargs):
+                yield token
+
     def _error_msg(self, e) -> str:
         s = str(e)
-        if "401" in s: return "API key issue. Check your OPENAI_API_KEY in .env"
-        if "429" in s: return "Rate limited. Please wait a moment."
-        if "ConnectError" in type(e).__name__: return "Can't reach the AI server. Check your connection."
-        return f"Something went wrong ({type(e).__name__}). Check the terminal."
+        name = type(e).__name__
+        key_var = {
+            "anthropic": "ANTHROPIC_API_KEY",
+            "openai":    "OPENAI_API_KEY",
+            "ollama_cloud": "OLLAMA_API_KEY",
+        }.get(self._backend)
+        if "401" in s or "authentication" in s.lower():
+            return (f"API key issue. Check your {key_var} in .env"
+                    if key_var else "The local model rejected the request.")
+        if "insufficient_quota" in s or "credit" in s.lower() or "billing" in s.lower():
+            return ("The AI account is out of credit. Add credit, or switch the Brain "
+                    "in AI Settings to a backend that works.")
+        if "429" in s or "rate_limit" in s.lower():
+            return "Rate limited. Please wait a moment."
+        if "credit" in s.lower() or "billing" in s.lower():
+            return "The AI account is out of credit. Check your Anthropic billing."
+        if "ConnectError" in name or "APIConnectionError" in name:
+            return "Can't reach the AI server. Check your connection."
+        if self._backend == "ollama" and ("model" in s.lower() and "not found" in s.lower()):
+            return "That local model isn't installed. Run: ollama pull phi3:mini"
+        return f"Something went wrong ({name}). Check the terminal."
 
     async def _reflect(self):
         try:

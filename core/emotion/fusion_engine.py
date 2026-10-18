@@ -3,10 +3,9 @@ Emotion fusion engine.
 Combines text sentiment + voice energy + history into a unified emotional state.
 """
 
-import time
 import logging
 from collections import deque
-from typing import Dict, Deque, Optional
+from typing import Dict, Deque
 
 from core.emotion.text_sentiment import analyse_sentiment
 from core.emotion.voice_energy import compute_energy, compute_zcr, classify_voice_emotion
@@ -77,9 +76,6 @@ def fuse(text: str, audio_np=None) -> Dict:
     }
 
 
-def get_emotion_history() -> list:
-    return list(_history)
-
 
 def _valence_to_label(val: float, text_emotion: str) -> str:
     if val >= 0.6:
@@ -97,49 +93,3 @@ def _valence_to_label(val: float, text_emotion: str) -> str:
     else:
         return "distressed"
 
-
-# ── Optional face emotion integration ────────────────────────────────────────
-_face_capture = None
-
-
-def start_face_emotion(camera_index: int = 0) -> bool:
-    """
-    Start background webcam face emotion capture (requires opencv-python + fer).
-    Call once at startup if you want face emotion included in fusion.
-    """
-    global _face_capture
-    from core.emotion.face_emotion import FaceEmotionCapture
-    _face_capture = FaceEmotionCapture(camera_index=camera_index)
-    ok = _face_capture.start()
-    if ok:
-        logger.info("Face emotion capture started on camera %d", camera_index)
-    return ok
-
-
-def stop_face_emotion():
-    global _face_capture
-    if _face_capture:
-        _face_capture.stop()
-        _face_capture = None
-
-
-def fuse_full(text: str, audio_np=None) -> Dict:
-    """
-    Full fusion: text + voice + face (if available).
-    Drop-in replacement for fuse() when face emotion is running.
-    """
-    result = fuse(text, audio_np)
-
-    if _face_capture:
-        face_result = _face_capture.get_latest()
-        if face_result:
-            face_val  = EMOTION_VALENCE.get(face_result["emotion"], 0.0)
-            face_conf = face_result["score"]
-            # Blend: text 60%, voice 25%, face 15%
-            blended = result["valence"] * 0.85 + face_val * face_conf * 0.15
-            result["face_emotion"]  = face_result["emotion"]
-            result["face_score"]    = face_conf
-            result["valence"]       = round(blended, 3)
-            result["current_emotion"] = _valence_to_label(blended, result["current_emotion"])
-
-    return result

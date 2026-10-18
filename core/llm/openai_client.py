@@ -4,7 +4,6 @@ Handles 429 rate limits gracefully instead of crashing.
 """
 
 import json
-import time
 import logging
 import asyncio
 from typing import AsyncGenerator, Optional
@@ -50,22 +49,29 @@ class OpenAIClient:
     async def is_available(self) -> bool:
         return bool(OPENAI_API_KEY)
 
-    def _build_messages(self, prompt: str, system: Optional[str]) -> list:
+    def _build_messages(self, prompt: str, system: Optional[str],
+                        messages: Optional[list] = None) -> list:
         msgs = []
         if system:
             msgs.append({"role": "system", "content": system})
-        msgs.append({"role": "user", "content": prompt})
+        if messages:
+            msgs.extend({"role": m["role"], "content": m["content"]}
+                        for m in messages if m.get("content"))
+        else:
+            msgs.append({"role": "user", "content": prompt})
         return msgs
 
     async def generate(self, prompt: str, system: Optional[str] = None,
-                       mode: str = "standard") -> str:
-        msgs    = self._build_messages(prompt, system)
+                       mode: str = "standard", messages: Optional[list] = None) -> str:
+        msgs    = self._build_messages(prompt, system, messages)
         payload = _build_payload(msgs, stream=False)
 
         for attempt, delay in enumerate(RETRY_DELAYS):
             try:
                 resp = await self._client.post(OPENAI_URL, json=payload)
                 if resp.status_code == 429:
+                    if "insufficient_quota" in resp.text or "credit" in resp.text:
+                        raise RuntimeError("OpenAI 429 insufficient_quota: account has no credit")
                     retry_after = int(resp.headers.get("retry-after", delay))
                     logger.warning("OpenAI rate limit — retrying in %ds (attempt %d/%d)",
                                    retry_after, attempt + 1, MAX_RETRIES)
@@ -73,15 +79,16 @@ class OpenAIClient:
                     continue
                 resp.raise_for_status()
                 return resp.json()["choices"][0]["message"]["content"].strip()
-            except httpx.HTTPStatusError as e:
+            except httpx.HTTPStatusError:
                 if attempt == MAX_RETRIES - 1:
                     raise
                 await asyncio.sleep(delay)
         raise RuntimeError("OpenAI request failed after all retries")
 
     async def generate_stream(self, prompt: str, system: Optional[str] = None,
-                               mode: str = "standard") -> AsyncGenerator[str, None]:
-        msgs    = self._build_messages(prompt, system)
+                               mode: str = "standard",
+                               messages: Optional[list] = None) -> AsyncGenerator[str, None]:
+        msgs    = self._build_messages(prompt, system, messages)
         payload = _build_payload(msgs, stream=True)
 
         for attempt in range(MAX_RETRIES):
@@ -90,6 +97,12 @@ class OpenAIClient:
                 async with self._client.stream("POST", OPENAI_URL,
                                                json=payload) as resp:
                     if resp.status_code == 429:
+                        body = (await resp.aread()).decode("utf-8", "ignore")
+                        if "insufficient_quota" in body or "credit" in body:
+                            # Out of credit is not transient — don't retry.
+                            raise RuntimeError("OpenAI 429 insufficient_quota: account has no credit")
+                        if attempt == MAX_RETRIES - 1:
+                            raise RuntimeError("OpenAI 429 rate limited after all retries")
                         # Read retry-after header before closing stream
                         retry_after = int(resp.headers.get("retry-after", delay))
                         logger.warning(

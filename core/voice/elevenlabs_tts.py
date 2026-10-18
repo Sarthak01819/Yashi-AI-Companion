@@ -13,6 +13,7 @@ from typing import Optional
 
 import httpx
 
+import config.settings as settings
 from config.settings import (
     ELEVENLABS_API_KEY,
     ELEVENLABS_VOICE_ID,
@@ -20,8 +21,12 @@ from config.settings import (
     ELEVENLABS_STABILITY,
     ELEVENLABS_SIMILARITY,
     ELEVENLABS_OUTPUT_DIR,
-    TTS_BACKEND,
 )
+
+
+def _tts_setting() -> str:
+    """Read TTS_BACKEND at call time so the sidebar toggle applies live."""
+    return getattr(settings, "TTS_BACKEND", "browser")
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +43,17 @@ EMOTION_PARAMS = {
 }
 
 _client: Optional[httpx.AsyncClient] = None
+_semaphore: Optional[asyncio.Semaphore] = None
+
+MAX_CONCURRENT = 2      # ElevenLabs free-plan concurrency limit
+MAX_ATTEMPTS = 4
+
+
+def _slots() -> asyncio.Semaphore:
+    global _semaphore
+    if _semaphore is None:
+        _semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+    return _semaphore
 
 def _get_client() -> httpx.AsyncClient:
     global _client
@@ -99,49 +115,48 @@ async def synthesise_elevenlabs(text: str, emotion: str = "neutral") -> Optional
         },
     }
 
-    try:
+    # The free ElevenLabs plan allows 2 concurrent requests. A reply is
+    # synthesised sentence-by-sentence in parallel, so without this limit the
+    # 3rd+ sentence gets HTTP 429 and falls back to the robotic browser voice.
+    async with _slots():
         client = _get_client()
-        resp = await client.post(url, json=payload)
-
-        if resp.status_code == 401:
-            logger.error("ElevenLabs: Invalid API key")
-            return None
-        if resp.status_code == 429:
-            retry_after = int(resp.headers.get("retry-after", 5))
-            logger.warning("ElevenLabs: Rate limited — waiting %ds then retrying", retry_after)
-            await asyncio.sleep(retry_after)
-            # Retry once
-            resp2 = await client.post(url, json=payload)
-            if resp2.status_code != 200:
-                logger.warning("ElevenLabs: Still rate limited — falling back to browser TTS")
+        for attempt in range(MAX_ATTEMPTS):
+            try:
+                resp = await client.post(url, json=payload)
+            except Exception as e:
+                logger.warning("ElevenLabs request failed: %s", e)
                 return None
-            resp2.raise_for_status()
-            out.write_bytes(resp2.content)
-            return out
 
-        resp.raise_for_status()
-        out.write_bytes(resp.content)
-        logger.debug("ElevenLabs TTS: %s (%d bytes)", out.name, len(resp.content))
-        return out
+            if resp.status_code == 200:
+                out.write_bytes(resp.content)
+                return out
+            if resp.status_code == 401:
+                logger.error("ElevenLabs: invalid API key")
+                return None
+            if resp.status_code == 429 and attempt < MAX_ATTEMPTS - 1:
+                # Usually a concurrency blip: retry soon rather than waiting long.
+                delay = min(float(resp.headers.get("retry-after", 0) or 0) or 0.6 * (attempt + 1), 3.0)
+                logger.info("ElevenLabs busy (429) — retrying in %.1fs", delay)
+                await asyncio.sleep(delay)
+                continue
 
-    except Exception as e:
-        logger.warning("ElevenLabs synthesis failed: %s", e)
-        return None
+            logger.warning("ElevenLabs: HTTP %s — using browser voice for this sentence",
+                           resp.status_code)
+            return None
+    return None
 
 
 async def synthesise(text: str, emotion: str = "neutral") -> Optional[Path]:
     """Unified synthesise — picks backend from settings."""
-    if TTS_BACKEND == "elevenlabs":
+    backend = _tts_setting()
+    if backend == "elevenlabs":
         return await synthesise_elevenlabs(text, emotion)
-    if TTS_BACKEND == "piper":
-        from core.voice.tts import synthesise_piper
-        return await synthesise_piper(text, emotion)
     return None
 
 
 def tts_backend() -> str:
-    if TTS_BACKEND == "elevenlabs" and ELEVENLABS_API_KEY:
+    """The backend actually usable right now (falls back to browser speech)."""
+    backend = _tts_setting()
+    if backend == "elevenlabs" and ELEVENLABS_API_KEY:
         return "elevenlabs"
-    if TTS_BACKEND == "piper":
-        return "piper"
     return "browser"

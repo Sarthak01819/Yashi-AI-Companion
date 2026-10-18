@@ -3,7 +3,7 @@ Model router — selects which Ollama model to use.
 Matches configured names against whatever is actually installed.
 """
 import logging
-from config.settings import MODEL_MAP, DEFAULT_MODEL, FALLBACK_MODEL
+from config.settings import MODEL_MAP, DEFAULT_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,3 @@ def select_model(mode: str = "standard") -> str:
         preferred, _available_models, fallback
     )
     return fallback
-
-
-def get_available_models() -> list:
-    return list(_available_models)

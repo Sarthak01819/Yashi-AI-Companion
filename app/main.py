@@ -4,6 +4,7 @@ Yashi FastAPI Application Entry Point
 
 import os
 import sys
+import asyncio
 import logging
 from pathlib import Path
 
@@ -27,22 +28,23 @@ except ImportError:
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-from config.settings import BASE_DIR, LOGS_DIR, DATA_DIR, LOG_LEVEL, LOG_FILE
+from config.settings import LOGS_DIR, DATA_DIR, LOG_LEVEL, LOG_FILE, FRONTEND_URL
 from core.memory.database import initialize_database
 from core.llm.model_router import set_available_models
 from core.llm.ollama_client import get_ollama_client
+from core.llm.anthropic_client import get_anthropic_client
+import config.settings as settings_mod
 from plugins.plugin_loader import load_all_plugins
 
 from app.routes.chat import router as chat_router
-from app.routes.audio import router as audio_router
 from app.routes.memory_api import router as memory_router
 from app.routes.tts_serve import router as tts_router
-from app.routes.voice import router as voice_router
 from app.routes.settings_api import router as settings_router
+from app.routes.stt_api import router as stt_router
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -62,29 +64,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("yashi.main")
 
-# ── Constants ─────────────────────────────────────────────────────────────────
-FRONTEND_DIR = BASE_DIR / "frontend"
-FRONTEND_DIST_DIR = FRONTEND_DIR / "dist"
-
-MIME_TYPES = {
-    ".html": "text/html",
-    ".css":  "text/css",
-    ".js":   "application/javascript",
-    ".json": "application/json",
-    ".png":  "image/png",
-    ".jpg":  "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".svg":  "image/svg+xml",
-    ".ico":  "image/x-icon",
-    ".wav":  "audio/wav",
-    ".mp3":  "audio/mpeg",
-    ".mp4":  "video/mp4",
-    ".woff2":"font/woff2",
-    ".woff": "font/woff",
-    ".ttf":  "font/ttf",
-}
-
-
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -94,22 +73,56 @@ async def lifespan(app: FastAPI):
 
     initialize_database()
 
-    from config.settings import LLM_BACKEND, OPENAI_API_KEY, TTS_BACKEND, ELEVENLABS_API_KEY
+    from config.settings import (
+        LLM_BACKEND, OPENAI_API_KEY, TTS_BACKEND, ELEVENLABS_API_KEY,
+    )
 
-    if LLM_BACKEND == "openai":
+    client = get_ollama_client()
+    ollama_models = []
+    if await client.is_available():
+        ollama_models = await client.list_models()
+        set_available_models(ollama_models)
+        if ollama_models:
+            logger.info("Ollama connected. Models: %s", ollama_models)
+        else:
+            logger.warning("Ollama is running but has no models. Run: ollama pull phi3:mini")
+
+    if LLM_BACKEND == "ollama_cloud":
+        from core.llm.ollama_client import get_ollama_cloud_client
+        ok, detail = await get_ollama_cloud_client().verify()
+        if ok:
+            logger.info("LLM backend: Ollama Cloud (%s); local fallback: %s",
+                        detail, settings_mod.DEFAULT_MODEL if ollama_models else "none")
+        else:
+            logger.error("Ollama Cloud is not usable: %s", detail)
+            if ollama_models:
+                settings_mod.LLM_BACKEND = "ollama"
+                logger.warning("Falling back to local Ollama (%s).", settings_mod.DEFAULT_MODEL)
+            else:
+                logger.error("No local model either. Run: ollama pull llama3.2:3b")
+    elif LLM_BACKEND == "anthropic":
+        ok, detail = await get_anthropic_client().verify()
+        if ok:
+            logger.info("LLM backend: Anthropic %s", detail)
+        else:
+            logger.error("Anthropic is not usable: %s", detail)
+            logger.error("Fix it by putting a working key in .env as ANTHROPIC_API_KEY=sk-ant-...")
+            fallback = ("openai" if OPENAI_API_KEY else
+                        "ollama" if ollama_models else None)
+            if fallback:
+                settings_mod.LLM_BACKEND = fallback
+                logger.warning("Falling back to '%s' so Yashi can still answer. "
+                               "Switch back to Claude from the sidebar once the key works.",
+                               fallback)
+            else:
+                logger.error("No usable LLM backend! Add a valid API key or run: ollama pull phi3:mini")
+    elif LLM_BACKEND == "openai":
         if not OPENAI_API_KEY:
             logger.error("OPENAI_API_KEY is not set! Create a .env file with OPENAI_API_KEY=sk-...")
         else:
             logger.info("LLM backend: OpenAI (%s)", OPENAI_API_KEY[:8] + "...")
-        client = None
-    else:
-        client = get_ollama_client()
-        if await client.is_available():
-            models = await client.list_models()
-            set_available_models(models)
-            logger.info("Ollama connected. Models: %s", models)
-        else:
-            logger.warning("Ollama not reachable.")
+    elif not ollama_models:
+        logger.error("LLM backend is 'ollama' but no models are installed. Run: ollama pull phi3:mini")
 
     if TTS_BACKEND == "elevenlabs":
         if not ELEVENLABS_API_KEY:
@@ -121,91 +134,95 @@ async def lifespan(app: FastAPI):
 
     plugins = load_all_plugins()
     logger.info("Plugins loaded: %s", [p.name for p in plugins])
-    logger.info("Yashi ready -> http://localhost:8000")
+    logger.info("Yashi API ready. Open the app: %s", FRONTEND_URL)
+    warmup = asyncio.create_task(_warm_up())
     yield
+    warmup.cancel()
     if client:
         await client.close()
+    try:
+        await get_anthropic_client().close()
+        from core.llm.ollama_client import get_ollama_cloud_client
+        await get_ollama_cloud_client().close()
+    except Exception:
+        pass
     logger.info("Yashi shut down.")
+
+
+async def _warm_up():
+    """Load the heavy models in the background so the first reply isn't slow."""
+    loop = asyncio.get_running_loop()
+    try:
+        from core.emotion.text_sentiment import analyse_sentiment
+        from core.memory.semantic_memory import search_memory
+        await loop.run_in_executor(None, analyse_sentiment, "hello")
+        await loop.run_in_executor(None, search_memory, "hello")
+        logger.info("Warm-up: sentiment + embedding models ready")
+        from core.voice.stt import _get_model as _load_whisper
+        await loop.run_in_executor(None, _load_whisper)
+        logger.info("Warm-up: Whisper speech-to-text ready")
+    except Exception as e:
+        logger.warning("Warm-up (local models) failed: %s", e)
+    if settings_mod.LLM_BACKEND == "ollama":
+        try:
+            from core.llm.model_router import select_model
+            r = await get_ollama_client()._client.post(
+                "/api/generate",
+                json={"model": select_model("standard"), "keep_alive": "30m",
+                      "options": {"num_ctx": 4096}},  # must match chat requests
+                timeout=300,
+            )
+            logger.info("Warm-up: Ollama model loaded (%s)", r.status_code)
+        except Exception as e:
+            logger.warning("Warm-up (Ollama) failed: %s", e)
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Yashi", version="1.0.0", lifespan=lifespan)
 
+# Only the Yashi frontend may call the API. A wildcard here would let any
+# website you visit drive Yashi from your browser.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:5173", "http://127.0.0.1:5173",   # vite dev
+        "http://localhost:4173", "http://127.0.0.1:4173",   # vite preview
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 app.include_router(chat_router)
-app.include_router(audio_router)
 app.include_router(memory_router)
 app.include_router(tts_router)
-app.include_router(voice_router)
 app.include_router(settings_router)
+app.include_router(stt_router)
 
 
-@app.get("/")
+# The backend is API-only; the one and only UI is the Vite app in frontend/.
+@app.get("/", include_in_schema=False)
 async def index():
-    index_file = FRONTEND_DIST_DIR / "index.html"
-    if not index_file.exists():
-        return Response(
-            content="Frontend build not found. Run `npm run build` in the frontend directory.",
-            status_code=503,
-        )
-    return FileResponse(str(index_file), media_type="text/html")
-
-
-@app.get("/assets/{filepath:path}")
-async def frontend_assets(filepath: str):
-    full_path = FRONTEND_DIST_DIR / "assets" / filepath
-    if not full_path.exists() or not full_path.is_file():
-        return Response(content=f"Not found: {filepath}", status_code=404)
-    media_type = MIME_TYPES.get(full_path.suffix.lower(), "application/octet-stream")
-    return FileResponse(str(full_path), media_type=media_type)
-
-
-@app.get("/static/{filepath:path}")
-async def static_files(filepath: str):
-    suffix = ("." + filepath.rsplit(".", 1)[-1].lower()) if "." in filepath else ""
-    for search_dir in [
-        FRONTEND_DIR / "assets",
-        DATA_DIR,
-        FRONTEND_DIR / "public",
-        FRONTEND_DIR,
-    ]:
-        full_path = search_dir / filepath
-        if full_path.exists() and full_path.is_file():
-            media_type = MIME_TYPES.get(suffix, "application/octet-stream")
-            return FileResponse(str(full_path), media_type=media_type)
-    return Response(content=f"Not found: {filepath}", status_code=404)
-
-
-@app.get("/static/yashi-avatar.mp4")
-async def serve_avatar_video():
-    """Serve the avatar video file."""
-    for search_path in [
-        BASE_DIR / "data" / "yashi-avatar.mp4",
-        BASE_DIR / "frontend" / "assets" / "yashi-avatar.mp4",
-        BASE_DIR / "frontend" / "public" / "yashi-avatar.mp4",
-    ]:
-        if search_path.exists():
-            return FileResponse(str(search_path), media_type="video/mp4")
-    return Response(content="Avatar video not found. Copy yashi-avatar.mp4 to data/", status_code=404)
+    return RedirectResponse(FRONTEND_URL)
 
 
 @app.get("/health")
 async def health():
-    from config.settings import LLM_BACKEND, OPENAI_API_KEY, TTS_BACKEND, ELEVENLABS_API_KEY
+    import config.settings as s
     info = {
         "status": "ok",
-        "llm_backend": LLM_BACKEND,
-        "tts_backend": TTS_BACKEND,
-        "openai_key_set": bool(OPENAI_API_KEY),
-        "elevenlabs_key_set": bool(ELEVENLABS_API_KEY),
+        "llm_backend": s.LLM_BACKEND,
+        "llm_model": {
+            "ollama_cloud": s.OLLAMA_CLOUD_MODEL,
+            "anthropic": s.ANTHROPIC_MODEL,
+            "openai":    s.OPENAI_MODEL,
+        }.get(s.LLM_BACKEND, s.DEFAULT_MODEL),
+        "tts_backend": s.TTS_BACKEND,
+        "ollama_cloud_key_set": bool(s.OLLAMA_API_KEY),
+        "anthropic_key_set": bool(s.ANTHROPIC_API_KEY),
+        "openai_key_set": bool(s.OPENAI_API_KEY),
+        "elevenlabs_key_set": bool(s.ELEVENLABS_API_KEY),
     }
-    if LLM_BACKEND == "ollama":
+    if s.LLM_BACKEND == "ollama":
         client = get_ollama_client()
         info["ollama"] = await client.is_available()
     return info

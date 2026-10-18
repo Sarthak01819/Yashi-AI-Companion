@@ -12,7 +12,6 @@ _pipeline = None
 
 POSITIVE_KEYWORDS = {"happy", "great", "awesome", "love", "excited", "glad", "wonderful", "good", "fantastic", "joy", "thanks", "thank"}
 NEGATIVE_KEYWORDS = {"sad", "bad", "terrible", "awful", "hate", "angry", "upset", "depressed", "anxious", "worried", "scared", "hurt", "pain", "lonely", "lost"}
-NEUTRAL_KEYWORDS  = {"okay", "fine", "alright", "whatever", "normal", "usual"}
 
 
 def _heuristic_sentiment(text: str) -> Dict:

@@ -1,25 +1,41 @@
-# API Keys — NEVER push these
+# API keys — NEVER push these
 .env
+.env.*
+!.env.example
 
 # Python
 __pycache__/
 *.pyc
 *.pyo
-Lib/
-venv/
 *.egg-info/
+.pytest_cache/
+venv/
+.venv/
+# This project folder doubles as a Python venv (python -m venv .)
+Lib/
+Include/
+Scripts/
+share/
+pyvenv.cfg
 
-# Node / Frontend build
+# Node / frontend build
 node_modules/
 frontend/dist/
 
-# Database & TTS cache (personal data)
+# Personal data: memory database, TTS cache
 data/yashi.db
+data/yashi.db-*
 data/tts_cache/
 
 # Logs
 logs/
 
-# OS
+# Local tool state
+.claude/
+.claude-flow/
+**/.claude-flow/
+
+# OS / misc
 .DS_Store
 Thumbs.db
+*.tmp

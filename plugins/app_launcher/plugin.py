@@ -1,7 +1,7 @@
 """
 App Launcher Plugin — opens apps and controls Spotify including song search.
 """
-import re, os, glob, logging, asyncio, subprocess, urllib.parse, urllib.request, webbrowser, ctypes, json
+import re, os, glob, shutil, logging, asyncio, subprocess, urllib.parse, urllib.request, webbrowser, ctypes, json
 from typing import Optional, Dict, Any
 from plugins.base_plugin import YashiPlugin
 
@@ -298,6 +298,35 @@ def _open_spotify_uri(uri: str) -> bool:
         return False
 
 
+def _known_app_paths(name: str) -> list:
+    """Configured paths for an app name (after alias resolution), fuzzy-matched."""
+    paths = WINDOWS_APPS.get(name, [])
+    if not paths:
+        for key, value in WINDOWS_APPS.items():
+            if name in key or key in name:
+                return value
+    return paths
+
+
+def _can_launch(name: str) -> bool:
+    """
+    True only when we can actually open this target. Keeps ordinary sentences
+    ("start over", "open up to me") from being swallowed by the launcher.
+    """
+    name = ALIASES.get(name.lower().strip(), name.lower().strip())
+    if not name:
+        return False
+    if name == "spotify":
+        return True
+    if name in KNOWN_WEBSITES:
+        return True
+    if any(os.path.isfile(p) for p in _known_app_paths(name)):
+        return True
+    if " " not in name and shutil.which(name):
+        return True
+    return False
+
+
 def _launch(name: str) -> bool:
     name = ALIASES.get(name.lower(), name.lower())
     if name == "spotify":
@@ -314,25 +343,29 @@ def _launch(name: str) -> bool:
         except Exception: pass
         return False
 
-    paths = WINDOWS_APPS.get(name, [])
-    # fuzzy match
-    if not paths:
-        for k, v in WINDOWS_APPS.items():
-            if name in k or k in name:
-                paths = v; break
-    for p in paths:
+    for p in _known_app_paths(name):
         try:
             subprocess.Popen([p], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             logger.info("Launched: %s", p)
             return True
         except (FileNotFoundError, Exception):
             continue
-    # last resort
-    try:
-        subprocess.Popen(f'start "" "{name}"', shell=True)
+
+    # A website we know by name.
+    if name in KNOWN_WEBSITES:
+        webbrowser.open(KNOWN_WEBSITES[name])
         return True
-    except Exception:
-        return False
+
+    # Last resort: only for a real executable on PATH — never a blind
+    # `start "<anything>"`, which "succeeds" for text that isn't an app at all.
+    exe = shutil.which(name) if " " not in name else None
+    if exe:
+        try:
+            subprocess.Popen([exe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        except Exception:
+            return False
+    return False
 
 
 def _resolve_site_url(site: str) -> Optional[str]:
@@ -454,7 +487,16 @@ class Plugin(YashiPlugin):
     trigger_phrases = ["open", "launch", "start", "play", "pause", "next", "search", "spotify", "youtube", "website", "browser"]
 
     async def can_handle(self, text: str, intent: Optional[str] = None) -> bool:
-        return intent in ("open_app", "app_control", "open_url", "spotify_search", "youtube_search", "open_website")
+        if intent in ("app_control", "open_url", "spotify_search",
+                      "youtube_search", "open_website"):
+            return True
+        if intent == "open_app":
+            # Only claim the message if the target is really an app we can open;
+            # otherwise it belongs to the conversation, not the launcher.
+            from plugins.intent_detector import detect_intent
+            data = detect_intent(text) or {}
+            return _can_launch(data.get("target", ""))
+        return False
 
     async def execute(self, text: str, context: Dict[str, Any]) -> Dict[str, Any]:
         intent_data = context.get("intent") or {}
@@ -489,7 +531,7 @@ class Plugin(YashiPlugin):
                 return {"success": True,
                     "message": f"Opening Spotify, finding '{song}', and starting playback.",
                     "data": {"song": song, "launched": launched, "workflow_queued": True}}
-            except Exception as e:
+            except Exception:
                 # Fallback: open in browser
                 url = f"https://open.spotify.com/search/{urllib.parse.quote(song)}"
                 webbrowser.open(url)
