@@ -93,6 +93,7 @@ const VrmAvatar = forwardRef(function VrmAvatar({ fallback = null, className = "
     let frame = 0;
     let vrm = null;
     let motion = null;
+    let baseYaw = 0;          // model's own facing after load (VRM 0.x is turned 180°)
 
     let renderer;
     try {
@@ -147,6 +148,60 @@ const VrmAvatar = forwardRef(function VrmAvatar({ fallback = null, className = "
     }
     window.addEventListener("pointermove", onPointerMove);
 
+    // ── Grab to spin 360° (turntable with inertia; double-click resets) ─────
+    const spin = { yaw: 0, velocity: 0, dragging: false, lastX: 0, lastT: 0, moved: 0, target: null };
+    mount.style.touchAction = "pan-y";          // horizontal drags rotate, vertical still scrolls
+    mount.style.cursor = "grab";
+    function onDown(event) {
+      if (event.button !== undefined && event.button !== 0) return;
+      spin.dragging = true;
+      spin.moved = 0;
+      spin.velocity = 0;
+      spin.target = null;
+      spin.lastX = event.clientX;
+      spin.lastT = performance.now();
+      mount.setPointerCapture?.(event.pointerId);
+      mount.style.cursor = "grabbing";
+    }
+    function onDrag(event) {
+      if (!spin.dragging) return;
+      const now = performance.now();
+      const dx = event.clientX - spin.lastX;
+      const dt = Math.max(1, now - spin.lastT) / 1000;
+      const delta = (dx / Math.max(200, mount.clientWidth)) * Math.PI * 2;
+      spin.yaw += delta;
+      spin.velocity = delta / dt;
+      spin.moved += Math.abs(dx);
+      spin.lastX = event.clientX;
+      spin.lastT = now;
+    }
+    function onUp() {
+      if (!spin.dragging) return;
+      spin.dragging = false;
+      mount.style.cursor = "grab";
+      if (performance.now() - spin.lastT > 80) spin.velocity = 0;   // held still before letting go
+    }
+    // A drag shouldn't also count as a click (headpat) on the stage underneath.
+    function onClickCapture(event) {
+      if (spin.moved > 6) {
+        event.stopPropagation();
+        event.preventDefault();
+      }
+      spin.moved = 0;
+    }
+    function onDoubleClick() {
+      // Ease back to facing the viewer the short way round.
+      const turns = Math.round(spin.yaw / (Math.PI * 2));
+      spin.target = turns * Math.PI * 2;
+      spin.velocity = 0;
+    }
+    mount.addEventListener("pointerdown", onDown);
+    mount.addEventListener("pointermove", onDrag);
+    mount.addEventListener("pointerup", onUp);
+    mount.addEventListener("pointercancel", onUp);
+    mount.addEventListener("click", onClickCapture, true);
+    mount.addEventListener("dblclick", onDoubleClick);
+
     function loadModel(urls) {
       const loader = new GLTFLoader();
       loader.register((parser) => new VRMLoaderPlugin(parser));
@@ -164,6 +219,7 @@ const VrmAvatar = forwardRef(function VrmAvatar({ fallback = null, className = "
         VRMUtils.removeUnnecessaryVertices(gltf.scene);
         VRMUtils.combineSkeletons(gltf.scene);
         VRMUtils.rotateVRM0(vrm);              // VRM 0.x models face the other way
+        baseYaw = vrm.scene.rotation.y;
         // VRM 0.x rigs are turned around on load, which inverts X/Z rotations.
         motion = new AvatarMotion(vrm, vrm.meta?.metaVersion === "0" ? -1 : 1);
         vrm.scene.traverse((object) => { object.frustumCulled = false; });
@@ -200,6 +256,11 @@ const VrmAvatar = forwardRef(function VrmAvatar({ fallback = null, className = "
 
     function animate() {
       frame = requestAnimationFrame(animate);
+      // Hidden (e.g. chat kept alive behind the dashboard): skip all work.
+      if (!mount.clientWidth || !mount.clientHeight) {
+        clock.getDelta();
+        return;
+      }
       // Re-frame whenever the container changes size (focus mode, window
       // resize, mobile rotation). Checked per frame: cheap and never misses.
       if (`${mount.clientWidth}x${mount.clientHeight}` !== framedSize) frameCamera();
@@ -208,6 +269,16 @@ const VrmAvatar = forwardRef(function VrmAvatar({ fallback = null, className = "
         const state = live.current;
         state.loudness = state.speaking ? readLoudness(state) : null;
         motion.update(delta, state, pointer, lookTarget);
+        if (!spin.dragging) {
+          if (spin.target !== null) {
+            spin.yaw += (spin.target - spin.yaw) * (1 - Math.exp(-delta * 8));
+            if (Math.abs(spin.target - spin.yaw) < 0.002) spin.target = null;
+          } else if (Math.abs(spin.velocity) > 0.01) {
+            spin.yaw += spin.velocity * delta;
+            spin.velocity *= Math.exp(-delta * 3.2);        // friction
+          }
+        }
+        vrm.scene.rotation.y = baseYaw + spin.yaw;
         vrm.update(delta);
       }
       renderer.render(scene, camera);
@@ -218,6 +289,12 @@ const VrmAvatar = forwardRef(function VrmAvatar({ fallback = null, className = "
       disposed = true;
       cancelAnimationFrame(frame);
       window.removeEventListener("pointermove", onPointerMove);
+      mount.removeEventListener("pointerdown", onDown);
+      mount.removeEventListener("pointermove", onDrag);
+      mount.removeEventListener("pointerup", onUp);
+      mount.removeEventListener("pointercancel", onUp);
+      mount.removeEventListener("click", onClickCapture, true);
+      mount.removeEventListener("dblclick", onDoubleClick);
       if (vrm) {
         scene.remove(vrm.scene);
         VRMUtils.deepDispose(vrm.scene);

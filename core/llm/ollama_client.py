@@ -9,18 +9,18 @@ from typing import AsyncGenerator, Optional
 
 import httpx
 
-from config.settings import (
-    LLM_MAX_TOKENS, LLM_TEMPERATURE, LLM_TOP_P,
-    OLLAMA_CLOUD_URL, OLLAMA_CLOUD_MODEL, OLLAMA_CLOUD_TIMEOUT, OLLAMA_API_KEY,
-)
+import config.settings as S
 
 logger = logging.getLogger(__name__)
 
 
 class OllamaCloudClient:
-    def __init__(self, api_key: str = OLLAMA_API_KEY, model: str = OLLAMA_CLOUD_MODEL,
-                 base_url: str = OLLAMA_CLOUD_URL, timeout: float = OLLAMA_CLOUD_TIMEOUT):
-        self.model = model
+    def __init__(self, api_key: str = None, model: str = None,
+                 base_url: str = None, timeout: float = None):
+        api_key = S.OLLAMA_API_KEY if api_key is None else api_key
+        self.model = model or S.OLLAMA_CLOUD_MODEL
+        base_url = base_url or S.OLLAMA_CLOUD_URL
+        timeout = timeout or S.OLLAMA_CLOUD_TIMEOUT
         self._client = httpx.AsyncClient(
             base_url=base_url,
             timeout=timeout,
@@ -34,9 +34,9 @@ class OllamaCloudClient:
             "stream": stream,
             "think": False,                    # no reasoning traces in the reply
             "options": {
-                "num_predict": LLM_MAX_TOKENS,
-                "temperature": LLM_TEMPERATURE,
-                "top_p": LLM_TOP_P,
+                "num_predict": S.LLM_MAX_TOKENS,
+                "temperature": S.LLM_TEMPERATURE,
+                "top_p": S.LLM_TOP_P,
             },
         }
 

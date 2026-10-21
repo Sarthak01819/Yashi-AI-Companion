@@ -14,14 +14,6 @@ from typing import Optional
 import httpx
 
 import config.settings as settings
-from config.settings import (
-    ELEVENLABS_API_KEY,
-    ELEVENLABS_VOICE_ID,
-    ELEVENLABS_MODEL,
-    ELEVENLABS_STABILITY,
-    ELEVENLABS_SIMILARITY,
-    ELEVENLABS_OUTPUT_DIR,
-)
 
 
 def _tts_setting() -> str:
@@ -60,7 +52,7 @@ def _get_client() -> httpx.AsyncClient:
     if _client is None:
         _client = httpx.AsyncClient(
             headers={
-                "xi-api-key":    ELEVENLABS_API_KEY,
+                "xi-api-key":    settings.ELEVENLABS_API_KEY,
                 "Content-Type":  "application/json",
                 "Accept":        "audio/mpeg",
             },
@@ -70,8 +62,8 @@ def _get_client() -> httpx.AsyncClient:
 
 
 def _cache_path(text: str, emotion: str) -> Path:
-    h = hashlib.sha1(f"{text}|{emotion}|{ELEVENLABS_VOICE_ID}".encode()).hexdigest()[:18]
-    return Path(ELEVENLABS_OUTPUT_DIR) / f"el_{h}.mp3"
+    h = hashlib.sha1(f"{text}|{emotion}|{settings.ELEVENLABS_VOICE_ID}".encode()).hexdigest()[:18]
+    return Path(settings.ELEVENLABS_OUTPUT_DIR) / f"el_{h}.mp3"
 
 
 def _normalise_tts_text(text: str) -> str:
@@ -92,23 +84,23 @@ async def synthesise_elevenlabs(text: str, emotion: str = "neutral") -> Optional
     Synthesise text with ElevenLabs. Returns path to MP3 or None on failure.
     """
     cleaned_text = _normalise_tts_text(text)
-    if not ELEVENLABS_API_KEY or not cleaned_text:
+    if not settings.ELEVENLABS_API_KEY or not cleaned_text:
         return None
 
-    Path(ELEVENLABS_OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
+    Path(settings.ELEVENLABS_OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
 
     out = _cache_path(cleaned_text, emotion)
     if out.exists():
         return out
 
     params = EMOTION_PARAMS.get(emotion, EMOTION_PARAMS["neutral"])
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{settings.ELEVENLABS_VOICE_ID}"
     payload = {
         "text":       cleaned_text,
-        "model_id":   ELEVENLABS_MODEL,
+        "model_id":   settings.ELEVENLABS_MODEL,
         "voice_settings": {
-            "stability":        min(1.0, max(0.0, (ELEVENLABS_STABILITY + params["stability"]) / 2.0)),
-            "similarity_boost": min(1.0, max(0.0, (ELEVENLABS_SIMILARITY + params["similarity_boost"]) / 2.0)),
+            "stability":        min(1.0, max(0.0, (settings.ELEVENLABS_STABILITY + params["stability"]) / 2.0)),
+            "similarity_boost": min(1.0, max(0.0, (settings.ELEVENLABS_SIMILARITY + params["similarity_boost"]) / 2.0)),
             "style":            params.get("style", 0.20),
             "speed":            params.get("speed", 1.04),
             "use_speaker_boost": True,
@@ -157,6 +149,6 @@ async def synthesise(text: str, emotion: str = "neutral") -> Optional[Path]:
 def tts_backend() -> str:
     """The backend actually usable right now (falls back to browser speech)."""
     backend = _tts_setting()
-    if backend == "elevenlabs" and ELEVENLABS_API_KEY:
+    if backend == "elevenlabs" and settings.ELEVENLABS_API_KEY:
         return "elevenlabs"
     return "browser"

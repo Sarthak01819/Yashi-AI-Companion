@@ -102,6 +102,18 @@ def initialize_database() -> None:
             )
         """)
 
+        # ── daily_checkins (profile dashboard: willpower / health / mood) ──────
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS daily_checkins (
+                date        TEXT PRIMARY KEY,
+                willpower   INTEGER NOT NULL,
+                health      INTEGER NOT NULL,
+                mood        INTEGER NOT NULL,
+                note        TEXT DEFAULT '',
+                updated_at  REAL NOT NULL
+            )
+        """)
+
         # ── session_stats ─────────────────────────────────────────────────────
         cur.execute("""
             CREATE TABLE IF NOT EXISTS session_stats (

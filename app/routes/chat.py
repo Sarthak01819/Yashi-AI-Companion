@@ -13,6 +13,14 @@ from plugins.plugin_loader import dispatch as plugin_dispatch
 
 logger = logging.getLogger(__name__)
 router  = APIRouter()
+
+
+def _greeting() -> str:
+    from core.personalization.persona import load
+    from core.personalization.profile import load_profile
+    name = load()["name"]
+    user = load_profile().get("display_name")
+    return f"Hey{' ' + user if user else ''}! {name} here. What's up?"
 _engines: dict = {}
 
 
@@ -26,7 +34,7 @@ async def chat_ws(websocket: WebSocket, client_id: str):
     await manager.send(client_id, {
         "type":    "connected",
         "session": engine.session_id,
-        "message": "Yashi is ready. How can I be here for you today?",
+        "message": _greeting(),
     })
 
     async def run_pipeline(user_text: str):

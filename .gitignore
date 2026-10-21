@@ -39,3 +39,6 @@ logs/
 .DS_Store
 Thumbs.db
 *.tmp
+
+# The venv rule above also matches this on case-insensitive filesystems.
+!frontend/src/lib/

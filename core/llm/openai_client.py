@@ -10,10 +10,7 @@ from typing import AsyncGenerator, Optional
 
 import httpx
 
-from config.settings import (
-    OPENAI_API_KEY, OPENAI_MODEL,
-    OPENAI_TIMEOUT, LLM_MAX_TOKENS, LLM_TEMPERATURE, LLM_TOP_P,
-)
+import config.settings as S
 
 logger = logging.getLogger(__name__)
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
@@ -25,29 +22,29 @@ RETRY_DELAYS  = [2, 5, 12, 25]   # seconds between retries
 
 def _build_payload(messages: list, stream: bool) -> dict:
     return {
-        "model":       OPENAI_MODEL,
+        "model":       S.OPENAI_MODEL,
         "messages":    messages,
-        "max_tokens":  LLM_MAX_TOKENS,
-        "temperature": LLM_TEMPERATURE,
-        "top_p":       LLM_TOP_P,
+        "max_tokens":  S.LLM_MAX_TOKENS,
+        "temperature": S.LLM_TEMPERATURE,
+        "top_p":       S.LLM_TOP_P,
         "stream":      stream,
     }
 
 
 class OpenAIClient:
     def __init__(self):
-        if not OPENAI_API_KEY:
-            logger.warning("OPENAI_API_KEY not set — add it to your .env file")
+        if not S.OPENAI_API_KEY:
+            logger.warning("S.OPENAI_API_KEY not set — add it to your .env file")
         self._client = httpx.AsyncClient(
-            timeout=OPENAI_TIMEOUT,
+            timeout=S.OPENAI_TIMEOUT,
             headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Authorization": f"Bearer {S.OPENAI_API_KEY}",
                 "Content-Type":  "application/json",
             }
         )
 
     async def is_available(self) -> bool:
-        return bool(OPENAI_API_KEY)
+        return bool(S.OPENAI_API_KEY)
 
     def _build_messages(self, prompt: str, system: Optional[str],
                         messages: Optional[list] = None) -> list:

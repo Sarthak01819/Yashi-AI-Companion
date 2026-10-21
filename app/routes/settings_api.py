@@ -1,5 +1,5 @@
 """
-Settings API — lets the frontend toggle LLM and TTS backends at runtime.
+Settings API — brain/voice switching, API keys and provider tests.
 
 The switch is applied two ways:
   1. on the live `config.settings` module object, so it takes effect on the very
@@ -7,17 +7,28 @@ The switch is applied two ways:
   2. persisted back into config/settings.py so it survives a restart.
 """
 import logging
+import re
 from pathlib import Path
 
-from fastapi import APIRouter
+import httpx
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 import config.settings as settings
+from app.security import require_app
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/settings")
 
-SETTINGS_FILE = Path(__file__).resolve().parent.parent.parent / "config" / "settings.py"
+ROOT = Path(__file__).resolve().parent.parent.parent
+SETTINGS_FILE = ROOT / "config" / "settings.py"
+ENV_FILE = ROOT / ".env"
+
+# Values editable from the dashboard. Secrets are never sent back unmasked.
+SECRET_KEYS = ("OLLAMA_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "ELEVENLABS_API_KEY")
+PLAIN_KEYS = ("OLLAMA_CLOUD_MODEL", "ANTHROPIC_MODEL", "OPENAI_MODEL",
+              "ELEVENLABS_VOICE_ID", "ELEVENLABS_MODEL")
 
 LLM_BACKENDS = ("ollama_cloud", "anthropic", "openai")
 TTS_BACKENDS = ("elevenlabs", "browser")
@@ -74,7 +85,7 @@ async def get_settings():
     }
 
 
-@router.post("/llm/{backend}")
+@router.post("/llm/{backend}", dependencies=[Depends(require_app)])
 async def set_llm_backend(backend: str):
     """Switch LLM backend: ollama_cloud | anthropic | openai"""
     if backend not in LLM_BACKENDS:
@@ -102,7 +113,7 @@ async def set_llm_backend(backend: str):
     }
 
 
-@router.post("/tts/{backend}")
+@router.post("/tts/{backend}", dependencies=[Depends(require_app)])
 async def set_tts_backend(backend: str):
     """Switch TTS backend: elevenlabs | browser"""
     if backend not in TTS_BACKENDS:
@@ -121,3 +132,128 @@ async def set_tts_backend(backend: str):
         "tts_backend": backend,
         "message": f"Voice switched to {label}. Active on your next message.{warning}",
     }
+
+
+# ── API keys ─────────────────────────────────────────────────────────────────
+def _mask(value: str) -> str:
+    return f"••••{value[-4:]}" if len(value) > 8 else ("••••" if value else "")
+
+
+def _write_env(updates: dict) -> None:
+    """Update or append KEY=value lines in .env, keeping everything else."""
+    lines = ENV_FILE.read_text(encoding="utf-8").splitlines() if ENV_FILE.exists() else []
+    remaining = dict(updates)
+    for i, line in enumerate(lines):
+        match = re.match(r"\s*([A-Z_][A-Z0-9_]*)\s*=", line)
+        if match and match.group(1) in remaining:
+            lines[i] = f"{match.group(1)}={remaining.pop(match.group(1))}"
+    lines += [f"{key}={value}" for key, value in remaining.items()]
+    ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def reset_clients() -> None:
+    """Drop cached API clients so the next request uses the new keys/models."""
+    import core.llm.anthropic_client as anthropic_client
+    import core.llm.ollama_client as ollama_client
+    import core.llm.openai_client as openai_client
+    import core.voice.elevenlabs_tts as elevenlabs_tts
+    anthropic_client._client = None
+    openai_client._client = None
+    ollama_client._instance = None
+    elevenlabs_tts._client = None
+
+
+@router.get("/keys")
+async def get_keys():
+    return {
+        "secrets": {k: {"set": bool(getattr(settings, k, "")), "masked": _mask(getattr(settings, k, ""))}
+                    for k in SECRET_KEYS},
+        "values": {k: getattr(settings, k, "") for k in PLAIN_KEYS},
+    }
+
+
+class KeyUpdate(BaseModel):
+    values: dict
+
+
+@router.put("/keys", dependencies=[Depends(require_app)])
+async def put_keys(update: KeyUpdate):
+    allowed = set(SECRET_KEYS) | set(PLAIN_KEYS)
+    clean = {}
+    for key, value in update.values.items():
+        if key not in allowed or not isinstance(value, str):
+            continue
+        value = value.strip()
+        if "\n" in value or "\r" in value or len(value) > 300:
+            return JSONResponse({"error": f"Invalid value for {key}"}, status_code=400)
+        if key in PLAIN_KEYS and not value:
+            continue                              # keep the default model / voice
+        clean[key] = value
+    if not clean:
+        return JSONResponse({"error": "Nothing to update"}, status_code=400)
+    _write_env(clean)
+    for key, value in clean.items():
+        setattr(settings, key, value)
+    reset_clients()
+    logger.info("Updated settings from dashboard: %s", ", ".join(sorted(clean)))
+    return {"success": True, "updated": sorted(clean), **(await get_keys())}
+
+
+@router.post("/test/{provider}", dependencies=[Depends(require_app)])
+async def test_provider(provider: str):
+    """Live check of one provider with the current key. Returns {ok, detail}."""
+    try:
+        if provider == "ollama_cloud":
+            if not settings.OLLAMA_API_KEY:
+                return {"ok": False, "detail": "No key set"}
+            from core.llm.ollama_client import get_ollama_cloud_client
+            ok, detail = await get_ollama_cloud_client().verify()
+        elif provider == "anthropic":
+            from core.llm.anthropic_client import get_anthropic_client
+            ok, detail = await get_anthropic_client().verify()
+        elif provider == "openai":
+            if not settings.OPENAI_API_KEY:
+                return {"ok": False, "detail": "No key set"}
+            async with httpx.AsyncClient(timeout=20) as client:
+                r = await client.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}"},
+                    json={"model": settings.OPENAI_MODEL, "max_tokens": 1,
+                          "messages": [{"role": "user", "content": "hi"}]},
+                )
+            ok = r.status_code == 200
+            detail = settings.OPENAI_MODEL if ok else (
+                "No credit left" if "insufficient_quota" in r.text else
+                "Key rejected" if r.status_code == 401 else f"HTTP {r.status_code}")
+        elif provider == "elevenlabs":
+            if not settings.ELEVENLABS_API_KEY:
+                return {"ok": False, "detail": "No key set"}
+            async with httpx.AsyncClient(timeout=20) as client:
+                r = await client.get("https://api.elevenlabs.io/v1/user/subscription",
+                                     headers={"xi-api-key": settings.ELEVENLABS_API_KEY})
+            ok = r.status_code == 200
+            if ok:
+                d = r.json()
+                detail = f"{d.get('character_count', 0):,} / {d.get('character_limit', 0):,} characters used"
+            else:
+                detail = "Key rejected" if r.status_code == 401 else f"HTTP {r.status_code}"
+        else:
+            return JSONResponse({"error": "Unknown provider"}, status_code=400)
+    except Exception as e:                                   # network etc.
+        ok, detail = False, f"{type(e).__name__}"
+    return {"ok": bool(ok), "detail": detail}
+
+
+@router.get("/ollama-models")
+async def ollama_models():
+    """Models available to the configured Ollama Cloud key (for the model picker)."""
+    if not settings.OLLAMA_API_KEY:
+        return {"models": []}
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(f"{settings.OLLAMA_CLOUD_URL}/api/tags",
+                                 headers={"Authorization": f"Bearer {settings.OLLAMA_API_KEY}"})
+        r.raise_for_status()
+        return {"models": sorted(m.get("name", "") for m in r.json().get("models", []))}
+    except Exception:
+        return {"models": []}

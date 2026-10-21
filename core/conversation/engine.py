@@ -98,12 +98,13 @@ class ConversationEngine:
         return tts_backend()
 
     def _sync_backend(self) -> None:
-        """Pick up a runtime LLM backend switch before the next generation."""
+        """Pick up a backend switch or new API key before the next generation."""
         backend = current_backend()
         if backend != self._backend:
             logger.info("LLM backend switched: %s -> %s", self._backend, backend)
             self._backend = backend
-            self.llm = _get_llm(backend)
+        # Cheap singleton lookup; returns a fresh client after keys change.
+        self.llm = _get_llm(backend)
 
     def new_session(self) -> str:
         self.request_stop()
@@ -251,7 +252,7 @@ class ConversationEngine:
                 save_message(self.session_id, "assistant", full_response,
                              self.emotion_state["current_emotion"])
                 store_memory(
-                    f"User: {user_text} | Yashi: {full_response[:180]}",
+                    f"User said: {user_text}",
                     source="conversation",
                 )
 
@@ -284,7 +285,9 @@ class ConversationEngine:
 
         save_message(self.session_id, "assistant", full_response,
                      self.emotion_state["current_emotion"])
-        store_memory(f"User: {user_text} | Yashi: {full_response[:180]}", source="conversation")
+        # Only the user's words: storing her own replies made her parrot old
+        # answers (and old personalities) back whenever a topic came up again.
+        store_memory(f"User said: {user_text}", source="conversation")
 
         yield {
             "type": "done", "full_text": full_response,

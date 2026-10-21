@@ -8,10 +8,10 @@ const TARGET_RATE = 16000;
 const FRAME_SIZE = 2048;            // ~43 ms at 48 kHz
 const MIN_RMS = 0.012;              // absolute floor for "this is speech"
 const NOISE_MULTIPLIER = 3;         // speech must be this much louder than the room
-const START_FRAMES = 3;             // ~130 ms of speech before we start recording
-const PREROLL_FRAMES = 8;           // keep ~340 ms before the trigger (first syllable)
+const START_FRAMES = 2;             // ~85 ms of speech before we start recording
+const PREROLL_FRAMES = 10;          // keep ~430 ms before the trigger (first syllable)
 const END_SILENCE_MS = 750;         // pause that ends a sentence
-const MIN_SPEECH_MS = 250;          // shorter bursts are clicks/coughs
+const MIN_SPEECH_MS = 200;          // shorter bursts are clicks/coughs
 const MAX_UTTERANCE_MS = 15000;
 
 function rms(samples) {
@@ -45,20 +45,22 @@ function toPcm16At16k(samples, sourceRate) {
   return out;
 }
 
-async function transcribe(pcm) {
-  const response = await fetch("/api/stt", {
+async function transcribe(pcm, wake) {
+  const response = await fetch(wake ? "/api/stt?wake=1" : "/api/stt", {
     method: "POST",
     headers: { "Content-Type": "application/octet-stream" },
     body: pcm.buffer,
   });
   if (!response.ok) throw new Error(`STT HTTP ${response.status}`);
   const data = await response.json();
-  return (data.text || "").trim();
+  return { text: (data.text || "").trim(), wake: !!data.wake, checked: "wake" in data };
 }
 
 /**
  * @param {object} handlers
- * @param {(text: string) => void} handlers.onUtterance  final transcript of one sentence
+ * @param {(text: string, wake: boolean, checked: boolean) => void} handlers.onUtterance  final transcript of one
+ *        sentence; `wake` is the backend's acoustic "it started with Yashi" verdict
+ * @param {() => boolean} [handlers.wantsWakeCheck]  ask the backend to check for the wake word
  * @param {(speaking: boolean) => void} [handlers.onSpeech]
  * @param {(busy: boolean) => void} [handlers.onTranscribing]
  * @param {(percent: number) => void} [handlers.onLevel]
@@ -72,6 +74,7 @@ export function createWhisperListener(handlers) {
     onTranscribing = () => {},
     onLevel = () => {},
     isMuted = () => false,
+    wantsWakeCheck = () => false,
     onError = () => {},
   } = handlers;
 
@@ -110,12 +113,13 @@ export function createWhisperListener(handlers) {
     if (!longEnough || captured.length === 0) return;
 
     const pcm = toPcm16At16k(concat(captured), sampleRate);
+    const checkWake = wantsWakeCheck();
     queue = queue.then(async () => {
       if (!running) return;
       onTranscribing(true);
       try {
-        const text = await transcribe(pcm);
-        if (running && text) onUtterance(text);
+        const { text, wake, checked } = await transcribe(pcm, checkWake);
+        if (running && (text || wake)) onUtterance(text, wake, checked);
       } catch (error) {
         onError(error);
       } finally {

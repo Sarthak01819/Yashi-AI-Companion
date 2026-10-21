@@ -1,4 +1,4 @@
-import { lazy, startTransition, Suspense, useEffect, useReducer, useRef } from "react";
+import { lazy, startTransition, Suspense, useEffect, useReducer, useRef, useState } from "react";
 
 import { createWhisperListener } from "./voice/whisperListener";
 import {
@@ -67,6 +67,9 @@ const WAKE_WORD_ALIASES = new Set([
   "yashie",
 ]);
 
+// Spellings that mean the recogniser really wrote her name, not a lookalike.
+const WAKE_WORD_EXACT = new Set(["yashi", "yashii", "yashy", "yaashi", "yashee", "yashie"]);
+
 // Brave exposes webkitSpeechRecognition but blocks Google's speech service,
 // so every attempt fails with a "network" error.
 function isBraveBrowser() {
@@ -118,20 +121,20 @@ const TTS_OPTIONS = [
 ];
 
 const REACTIONS = [
-  { id: "headpat", label: "Headpat", jp: "なでなで" },
-  { id: "tease", label: "Tease", jp: "からかう" },
-  { id: "cheer", label: "Cheer", jp: "おうえん" },
+  { id: "headpat", label: "Headpat", hint: "pat pat" },
+  { id: "tease", label: "Tease", hint: "poke" },
+  { id: "cheer", label: "Cheer", hint: "go go!" },
 ];
 
-const MOOD_JP = {
-  joyful: "ごきげん",
-  happy: "うれしい",
-  excited: "わくわく",
-  content: "おだやか",
-  neutral: "ふつう",
-  concerned: "しんぱい",
-  sad: "かなしい",
-  distressed: "つらい",
+const MOOD_NOTE = {
+  joyful: "on cloud nine",
+  happy: "feeling good",
+  excited: "buzzing",
+  content: "at ease",
+  neutral: "steady",
+  concerned: "a bit worried",
+  sad: "feeling down",
+  distressed: "having a hard time",
 };
 
 // Angled "game UI" cuts used on buttons, tags and the nameplate.
@@ -174,12 +177,9 @@ function OptionCard({ active, label, hint, onClick }) {
   );
 }
 
-function SectionLabel({ en, jp }) {
+function SectionLabel({ en }) {
   return (
-    <div className="mb-2 flex items-baseline gap-2">
-      <span className="text-[0.66rem] font-extrabold uppercase tracking-[0.22em] text-[#6b4a51]">{en}</span>
-      <span className="text-[0.62rem] font-bold text-yashi-brand">{jp}</span>
-    </div>
+    <div className="mb-2 text-[0.66rem] font-extrabold uppercase tracking-[0.22em] text-[#6b4a51]">{en}</div>
   );
 }
 
@@ -243,7 +243,7 @@ function extractWakeCommand(transcript) {
   const lead = words[0] === "hey" || words[0] === "hi" || words[0] === "ok" || words[0] === "okay" ? 1 : 0;
   const leadingPair = words.slice(lead, lead + 2).join(" ");
   if (WAKE_WORD_LEADING_PHRASES.has(leadingPair)) {
-    return { heard: true, command: words.slice(lead + 2).join(" ").trim() };
+    return { heard: true, exact: false, command: words.slice(lead + 2).join(" ").trim() };
   }
 
   for (let index = 0; index < words.length; index += 1) {
@@ -252,10 +252,10 @@ function extractWakeCommand(transcript) {
       index < words.length - 1 ? `${words[index]} ${words[index + 1]}` : "";
 
     if (isWakeLikePhrase(pair)) {
-      return { heard: true, command: words.slice(index + 2).join(" ").trim() };
+      return { heard: true, exact: false, command: words.slice(index + 2).join(" ").trim() };
     }
     if (isWakeLikePhrase(single)) {
-      return { heard: true, command: words.slice(index + 1).join(" ").trim() };
+      return { heard: true, exact: WAKE_WORD_EXACT.has(single), command: words.slice(index + 1).join(" ").trim() };
     }
   }
 
@@ -266,6 +266,7 @@ function extractWakeCommand(transcript) {
 
   return {
     heard: true,
+    exact: WAKE_WORD_EXACT.has(match[0].toLowerCase()),
     command: normalized.slice(match.index + match[0].length).trim(),
   };
 }
@@ -523,8 +524,11 @@ function reducer(state, action) {
   }
 }
 
-function App() {
+function App({ active = true }) {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const [persona, setPersona] = useState({ name: "Yashi" });
+  // Focus mode: slide the chat away to see only Yashi.
+  const [chatHidden, setChatHidden] = useState(false);
 
   const stageRef = useRef(null);
   const hudRef = useRef(null);
@@ -540,6 +544,7 @@ function App() {
   const reconnectTimerRef = useRef(0);
   const streamIdRef = useRef(null);
   const stopRequestedRef = useRef(false);
+  const greetedRef = useRef(false);
   const typingRef = useRef(false);
   const nextMessageIdRef = useRef(1);
   const isConnectedRef = useRef(false);
@@ -1125,7 +1130,10 @@ function App() {
   function handleSocketMessage(data) {
     switch (data.type) {
       case "connected":
-        addMessage("bot", data.message, "neutral");
+        if (!greetedRef.current) {
+          greetedRef.current = true;
+          addMessage("bot", data.message, "neutral");
+        }
         setStatus("ok", "Ready");
         avatarRef.current?.setThinking(false);
         break;
@@ -1276,9 +1284,17 @@ function App() {
   }
 
   // Wake-word logic for one finished sentence.
-  function handleWakeTranscript(text) {
-    const match = extractWakeCommand(text);
+  function handleWakeTranscript(text, acousticWake = false, acousticChecked = false) {
+    let match = extractWakeCommand(text);
     const armed = Date.now() < wakeArmedUntilRef.current;
+    if (acousticChecked && match.heard && !match.exact && !acousticWake) {
+      match = { heard: false, command: "" };     // "yes she did", "Yoshi": not her
+    }
+    // The backend heard "Yashi" in the sound itself even though the transcript
+    // lost it ("What time is it?"): the whole sentence is the command.
+    if (!match.heard && acousticWake && !armed) {
+      match = { heard: true, command: normalizeSpeechText(text).replace(/^(?:hey|hi|ok|okay)\s+/, "") };
+    }
 
     if (match.heard && match.command.length > 1) {
       wakeArmedUntilRef.current = 0;
@@ -1303,16 +1319,16 @@ function App() {
     }
   }
 
-  function handleWhisperUtterance(raw) {
+  function handleWhisperUtterance(raw, acousticWake = false, acousticChecked = false) {
     whisperErrorsRef.current = 0;
     const text = applySpeechCorrections(raw);
-    if (!text) return;
+    if (!text && !acousticWake) return;
     if (whisperModeRef.current === "mic") {
       setMicBar(true, "Listening - speak now...");
       sendText(text);
       return;
     }
-    handleWakeTranscript(text);
+    handleWakeTranscript(text, acousticWake, acousticChecked);
   }
 
   async function startWhisper(mode) {
@@ -1330,6 +1346,8 @@ function App() {
         if (whisperModeRef.current === "mic") setVolumePercent(percent);
       },
       isMuted: isAssistantSpeaking,
+      // Only while waiting for her name; once armed, everything is the command.
+      wantsWakeCheck: () => whisperModeRef.current === "wake" && Date.now() >= wakeArmedUntilRef.current,
       onError(error) {
         console.warn("[Yashi whisper]", error);
         whisperErrorsRef.current += 1;
@@ -1576,7 +1594,7 @@ function App() {
   async function switchLLM(backend) {
     try {
       setStatus("busy", "Switching LLM...");
-      const r = await fetch(`/api/settings/llm/${backend}`, { method: "POST" });
+      const r = await fetch(`/api/settings/llm/${backend}`, { method: "POST", headers: { "X-Yashi": "1" } });
       const d = await r.json();
       dispatch({ type: "set_backends", llm: backend, tts: state.ttsBackend });
       addNote(d.message || `LLM switched to ${backend}`);
@@ -1589,7 +1607,7 @@ function App() {
 
   async function switchTTS(backend) {
     try {
-      const r = await fetch(`/api/settings/tts/${backend}`, { method: "POST" });
+      const r = await fetch(`/api/settings/tts/${backend}`, { method: "POST", headers: { "X-Yashi": "1" } });
       const d = await r.json();
       dispatch({ type: "set_backends", llm: state.llmBackend, tts: backend });
       addNote(d.message || `TTS switched to ${backend}`);
@@ -1688,6 +1706,16 @@ function App() {
     introStagger(hudRef.current);
   }, []);
 
+  useEffect(() => {
+    if (!active) return;
+    fetch("/api/persona")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((p) => p && setPersona({ name: p.name || "Yashi" }))
+      .catch(() => {});
+    fetchSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
+
   // Mood meter: valence -1..1 -> 0..100 %.
   useEffect(() => {
     setMeter(meterRef.current, ((state.valence + 1) / 2) * 100);
@@ -1780,7 +1808,7 @@ function App() {
           aria-label="Give Yashi a headpat"
           className="absolute inset-0 block cursor-pointer"
           onClick={(event) => react("headpat", event)}
-          title="Click her for a headpat"
+          title="Click for a headpat · drag to spin her · double-click to face you"
           type="button"
         >
           <Suspense fallback={null}>
@@ -1806,10 +1834,10 @@ function App() {
           <div className="pt-5">
             <div className="flex items-stretch">
               <div className="bg-yashi-brand py-2 pl-5 pr-7 text-white [clip-path:polygon(0_0,100%_0,calc(100%-14px)_100%,0_100%)]">
-                <div className="text-[1.45rem] font-black leading-none tracking-[0.2em]">YASHI</div>
+                <div className="text-[1.45rem] font-black uppercase leading-none tracking-[0.2em]">{persona.name}</div>
               </div>
               <div className="-ml-3 flex items-center bg-white pl-6 pr-5 text-[0.78rem] font-black tracking-[0.25em] text-yashi-brand [clip-path:polygon(14px_0,100%_0,calc(100%-10px)_100%,0_100%)]">
-                ヤシ
+                ♡
               </div>
             </div>
             <div className="mt-2.5 flex items-center gap-2 pl-5 text-[0.72rem] font-semibold tracking-wide text-white/75">
@@ -1828,10 +1856,10 @@ function App() {
             <div className="bg-[linear-gradient(to_top,#000_0%,rgba(0,0,0,0.88)_55%,transparent_100%)] p-4 pt-16">
               <div className="mb-2 flex items-end justify-between gap-3">
                 <div key={state.emotion} ref={popBadge}>
-                  <div className="text-[0.6rem] font-bold uppercase tracking-[0.28em] text-white/45">Mood · 気分</div>
+                  <div className="text-[0.6rem] font-bold uppercase tracking-[0.28em] text-white/45">Current mood</div>
                   <div className="flex items-baseline gap-2">
                     <span className="text-[1.15rem] font-black capitalize text-white">{state.emotion}</span>
-                    <span className="text-[0.72rem] font-bold text-[#ff8da1]">{MOOD_JP[state.emotion] || ""}</span>
+                    <span className="text-[0.72rem] font-bold text-[#ff8da1]">{MOOD_NOTE[state.emotion] || ""}</span>
                   </div>
                 </div>
                 <span
@@ -1865,7 +1893,7 @@ function App() {
                     type="button"
                   >
                     <div className="pl-1 text-[0.76rem] font-extrabold">{reaction.label}</div>
-                    <div className="pl-1 text-[0.6rem] font-bold text-white/45">{reaction.jp}</div>
+                    <div className="pl-1 text-[0.6rem] font-bold text-white/45">{reaction.hint}</div>
                   </button>
                 ))}
               </div>
@@ -1882,19 +1910,46 @@ function App() {
         </button>
       </section>
 
+      {/* ── Focus mode: minimize / restore the chat ──────────────────────────── */}
+      {state.avatarFocus ? (
+        <button
+          aria-label={chatHidden ? "Show chat" : "Hide chat"}
+          className={cx(
+            "absolute z-30 flex items-center justify-center bg-yashi-brand text-white shadow-[0_8px_24px_rgba(200,16,46,0.45)] transition-all duration-500 hover:bg-yashi-brand-strong",
+            // phones: a tab on the top edge of the chat, slides to the bottom
+            "left-1/2 h-7 w-16 -translate-x-1/2 rounded-t-lg",
+            chatHidden ? "bottom-0" : "bottom-[calc(48vh+12px)]",
+            // desktop: a tab on the left edge of the chat, slides to the right edge
+            "min-[900px]:bottom-auto min-[900px]:left-auto min-[900px]:top-1/2 min-[900px]:h-16 min-[900px]:w-7 min-[900px]:translate-x-0 min-[900px]:-translate-y-1/2 min-[900px]:rounded-l-lg min-[900px]:rounded-tr-none",
+            chatHidden ? "min-[900px]:right-0" : "min-[900px]:right-[446px]"
+          )}
+          onClick={() => setChatHidden((hidden) => !hidden)}
+          title={chatHidden ? "Show chat" : "Hide chat"}
+          type="button"
+        >
+          <svg aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" strokeLinecap="round"
+            strokeLinejoin="round" strokeWidth="2.6" viewBox="0 0 24 24">
+            {/* desktop arrows point left/right, phone arrows up/down */}
+            <path className="min-[900px]:hidden" d={chatHidden ? "M6 15l6-6 6 6" : "M6 9l6 6 6-6"} />
+            <path className="hidden min-[900px]:block" d={chatHidden ? "M15 6l-6 6 6 6" : "M9 6l6 6-6 6"} />
+          </svg>
+        </button>
+      ) : null}
+
       {/* ── Dialogue ───────────────────────────────────────────────────────── */}
       <main
+        aria-hidden={state.avatarFocus && chatHidden ? true : undefined}
         className={cx(
           "flex min-h-0 min-w-0 flex-col",
           state.avatarFocus
-            ? "absolute inset-x-3 bottom-3 z-20 h-[48vh] overflow-hidden rounded-2xl border border-white/15 bg-[rgba(251,246,246,0.94)] shadow-[0_30px_80px_rgba(0,0,0,0.5)] backdrop-blur-xl min-[900px]:inset-x-auto min-[900px]:right-4 min-[900px]:top-16 min-[900px]:h-auto min-[900px]:w-[430px]"
-            : "relative flex-1 bg-yashi-shell"
+            ? "absolute inset-x-3 bottom-3 z-20 h-[48vh] overflow-hidden rounded-2xl border border-white/15 bg-[rgba(251,246,246,0.94)] shadow-[0_30px_80px_rgba(0,0,0,0.5)] backdrop-blur-xl transition-transform duration-500 ease-out min-[900px]:inset-x-auto min-[900px]:right-4 min-[900px]:top-16 min-[900px]:h-auto min-[900px]:w-[430px]"
+            : "relative flex-1 bg-yashi-shell",
+          state.avatarFocus && chatHidden && "pointer-events-none translate-y-[calc(100%+24px)] min-[900px]:translate-x-[calc(100%+24px)] min-[900px]:translate-y-0"
         )}
       >
         <header className="flex flex-wrap items-center gap-2 border-b border-yashi-border bg-white px-4 py-3">
           <div className="mr-auto leading-tight">
             <div className="text-[0.95rem] font-black tracking-wide">Conversation</div>
-            <div className="text-[0.6rem] font-bold tracking-[0.35em] text-yashi-brand">会話</div>
           </div>
           {state.micBar.on ? (
             <div className="flex min-w-0 max-w-[40%] items-center gap-1.5 text-[0.72rem] font-semibold text-yashi-brand">
@@ -1907,6 +1962,12 @@ function App() {
             Wake word
           </ChipButton>
           <ChipButton onClick={() => dispatch({ type: "toggle_settings" })}>Settings</ChipButton>
+          <a
+            className="rounded-md border border-yashi-brand bg-yashi-brand px-3 py-1.5 text-[0.72rem] font-extrabold tracking-wide text-white transition hover:bg-yashi-brand-strong"
+            href="#/dashboard/profile"
+          >
+            Dashboard
+          </a>
         </header>
 
         <div className={cx("h-[3px] w-full bg-yashi-panel", state.volumeVisible ? "block" : "hidden")}>
@@ -1942,8 +2003,8 @@ function App() {
                 ref={enter(`m${message.id}`, messageEntrance(message.role))}
               >
                 {showName ? (
-                  <span className="mb-1 bg-yashi-brand py-0.5 pl-2.5 pr-3.5 text-[0.6rem] font-black tracking-[0.24em] text-white [clip-path:polygon(0_0,100%_0,calc(100%-6px)_100%,0_100%)]">
-                    YASHI
+                  <span className="mb-1 bg-yashi-brand py-0.5 pl-2.5 pr-3.5 text-[0.6rem] font-black uppercase tracking-[0.24em] text-white [clip-path:polygon(0_0,100%_0,calc(100%-6px)_100%,0_100%)]">
+                    {persona.name}
                   </span>
                 ) : null}
                 <div className={getBubbleClass(message)}>{message.text}</div>
@@ -2030,13 +2091,12 @@ function App() {
             <div className="flex items-start justify-between">
               <div className="leading-tight">
                 <div className="text-[1.1rem] font-black tracking-wide">Settings</div>
-                <div className="text-[0.62rem] font-bold tracking-[0.35em] text-yashi-brand">設定</div>
               </div>
               <ChipButton onClick={() => dispatch({ type: "toggle_settings" })}>Close</ChipButton>
             </div>
 
             <div>
-              <SectionLabel en="Brain" jp="頭脳" />
+              <SectionLabel en="Brain" />
               <div className="grid grid-cols-2 gap-2">
                 {LLM_OPTIONS.map((option) => (
                   <OptionCard
@@ -2051,7 +2111,7 @@ function App() {
             </div>
 
             <div>
-              <SectionLabel en="Voice" jp="声" />
+              <SectionLabel en="Voice" />
               <div className="grid grid-cols-2 gap-2">
                 {TTS_OPTIONS.map((option) => (
                   <OptionCard
@@ -2066,7 +2126,7 @@ function App() {
             </div>
 
             <div>
-              <SectionLabel en="Memory" jp="記憶" />
+              <SectionLabel en="Memory" />
               <div className="flex flex-wrap gap-2">
                 <ChipButton onClick={() => openWindow("/api/memory/facts")}>Personal facts</ChipButton>
                 <ChipButton onClick={() => openWindow("/api/memory/reflections")}>Reflections</ChipButton>

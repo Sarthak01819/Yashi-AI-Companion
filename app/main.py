@@ -44,6 +44,7 @@ from app.routes.memory_api import router as memory_router
 from app.routes.tts_serve import router as tts_router
 from app.routes.settings_api import router as settings_router
 from app.routes.stt_api import router as stt_router
+from app.routes.profile_api import router as profile_router
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -172,6 +173,7 @@ app.include_router(memory_router)
 app.include_router(tts_router)
 app.include_router(settings_router)
 app.include_router(stt_router)
+app.include_router(profile_router)
 
 
 # The backend is API-only; the one and only UI is the Vite app in frontend/.

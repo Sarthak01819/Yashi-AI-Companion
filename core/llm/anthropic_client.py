@@ -13,15 +13,7 @@ from typing import AsyncGenerator, List, Optional
 
 import anthropic
 
-from config.settings import (
-    ANTHROPIC_API_KEY,
-    ANTHROPIC_MODEL,
-    ANTHROPIC_TIMEOUT,
-    ANTHROPIC_THINKING,
-    ANTHROPIC_EFFORT_MAP,
-    ANTHROPIC_MAX_TOKENS_MAP,
-    LLM_MAX_TOKENS,
-)
+import config.settings as S
 
 logger = logging.getLogger(__name__)
 
@@ -34,24 +26,24 @@ NO_THINKING_GUARD = (
 
 class AnthropicClient:
     def __init__(self):
-        if not ANTHROPIC_API_KEY:
-            logger.warning("ANTHROPIC_API_KEY not set — add it to your .env file")
+        if not S.ANTHROPIC_API_KEY:
+            logger.warning("S.ANTHROPIC_API_KEY not set — add it to your .env file")
         self._client = anthropic.AsyncAnthropic(
-            api_key=ANTHROPIC_API_KEY or None,
-            timeout=ANTHROPIC_TIMEOUT,
+            api_key=S.ANTHROPIC_API_KEY or None,
+            timeout=S.ANTHROPIC_TIMEOUT,
             max_retries=2,
         )
 
     async def is_available(self) -> bool:
-        return bool(ANTHROPIC_API_KEY)
+        return bool(S.ANTHROPIC_API_KEY)
 
     async def verify(self) -> tuple:
         """Cheap auth probe (no tokens billed). Returns (ok, detail)."""
-        if not ANTHROPIC_API_KEY:
-            return False, "ANTHROPIC_API_KEY is not set"
+        if not S.ANTHROPIC_API_KEY:
+            return False, "S.ANTHROPIC_API_KEY is not set"
         try:
             await self._client.models.list(limit=1)
-            return True, ANTHROPIC_MODEL
+            return True, S.ANTHROPIC_MODEL
         except anthropic.AuthenticationError:
             return False, "API key is invalid or revoked"
         except anthropic.PermissionDeniedError:
@@ -83,15 +75,15 @@ class AnthropicClient:
     def _kwargs(self, prompt: str, system: Optional[str], mode: str,
                 messages: Optional[List[dict]]) -> dict:
         system_text = system or ""
-        thinking_off = ANTHROPIC_THINKING == "disabled"
+        thinking_off = S.ANTHROPIC_THINKING == "disabled"
         if thinking_off and system_text:
             system_text = f"{system_text}\n{NO_THINKING_GUARD}"
 
         kwargs = {
-            "model":      ANTHROPIC_MODEL,
-            "max_tokens": ANTHROPIC_MAX_TOKENS_MAP.get(mode, LLM_MAX_TOKENS),
+            "model":      S.ANTHROPIC_MODEL,
+            "max_tokens": S.ANTHROPIC_MAX_TOKENS_MAP.get(mode, S.LLM_MAX_TOKENS),
             "messages":   self._build_messages(prompt, messages),
-            "output_config": {"effort": ANTHROPIC_EFFORT_MAP.get(mode, "low")},
+            "output_config": {"effort": S.ANTHROPIC_EFFORT_MAP.get(mode, "low")},
         }
         if system_text:
             kwargs["system"] = system_text
