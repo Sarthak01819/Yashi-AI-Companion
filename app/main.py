@@ -34,8 +34,7 @@ from contextlib import asynccontextmanager
 
 from config.settings import LOGS_DIR, DATA_DIR, LOG_LEVEL, LOG_FILE, FRONTEND_URL
 from core.memory.database import initialize_database
-from core.llm.model_router import set_available_models
-from core.llm.ollama_client import get_ollama_client
+from core.llm.ollama_client import get_ollama_cloud_client
 from core.llm.anthropic_client import get_anthropic_client
 import config.settings as settings_mod
 from plugins.plugin_loader import load_all_plugins
@@ -73,56 +72,9 @@ async def lifespan(app: FastAPI):
 
     initialize_database()
 
-    from config.settings import (
-        LLM_BACKEND, OPENAI_API_KEY, TTS_BACKEND, ELEVENLABS_API_KEY,
-    )
+    from config.settings import TTS_BACKEND, ELEVENLABS_API_KEY
 
-    client = get_ollama_client()
-    ollama_models = []
-    if await client.is_available():
-        ollama_models = await client.list_models()
-        set_available_models(ollama_models)
-        if ollama_models:
-            logger.info("Ollama connected. Models: %s", ollama_models)
-        else:
-            logger.warning("Ollama is running but has no models. Run: ollama pull phi3:mini")
-
-    if LLM_BACKEND == "ollama_cloud":
-        from core.llm.ollama_client import get_ollama_cloud_client
-        ok, detail = await get_ollama_cloud_client().verify()
-        if ok:
-            logger.info("LLM backend: Ollama Cloud (%s); local fallback: %s",
-                        detail, settings_mod.DEFAULT_MODEL if ollama_models else "none")
-        else:
-            logger.error("Ollama Cloud is not usable: %s", detail)
-            if ollama_models:
-                settings_mod.LLM_BACKEND = "ollama"
-                logger.warning("Falling back to local Ollama (%s).", settings_mod.DEFAULT_MODEL)
-            else:
-                logger.error("No local model either. Run: ollama pull llama3.2:3b")
-    elif LLM_BACKEND == "anthropic":
-        ok, detail = await get_anthropic_client().verify()
-        if ok:
-            logger.info("LLM backend: Anthropic %s", detail)
-        else:
-            logger.error("Anthropic is not usable: %s", detail)
-            logger.error("Fix it by putting a working key in .env as ANTHROPIC_API_KEY=sk-ant-...")
-            fallback = ("openai" if OPENAI_API_KEY else
-                        "ollama" if ollama_models else None)
-            if fallback:
-                settings_mod.LLM_BACKEND = fallback
-                logger.warning("Falling back to '%s' so Yashi can still answer. "
-                               "Switch back to Claude from the sidebar once the key works.",
-                               fallback)
-            else:
-                logger.error("No usable LLM backend! Add a valid API key or run: ollama pull phi3:mini")
-    elif LLM_BACKEND == "openai":
-        if not OPENAI_API_KEY:
-            logger.error("OPENAI_API_KEY is not set! Create a .env file with OPENAI_API_KEY=sk-...")
-        else:
-            logger.info("LLM backend: OpenAI (%s)", OPENAI_API_KEY[:8] + "...")
-    elif not ollama_models:
-        logger.error("LLM backend is 'ollama' but no models are installed. Run: ollama pull phi3:mini")
+    await _choose_brain()
 
     if TTS_BACKEND == "elevenlabs":
         if not ELEVENLABS_API_KEY:
@@ -138,19 +90,54 @@ async def lifespan(app: FastAPI):
     warmup = asyncio.create_task(_warm_up())
     yield
     warmup.cancel()
-    if client:
-        await client.close()
-    try:
-        await get_anthropic_client().close()
-        from core.llm.ollama_client import get_ollama_cloud_client
-        await get_ollama_cloud_client().close()
-    except Exception:
-        pass
+    for close in (get_anthropic_client().close, get_ollama_cloud_client().close):
+        try:
+            await close()
+        except Exception:
+            pass
     logger.info("Yashi shut down.")
 
 
+async def _brain_ok(backend: str) -> tuple:
+    """Can this cloud brain answer right now? Returns (ok, detail)."""
+    if backend == "ollama_cloud":
+        if not settings_mod.OLLAMA_API_KEY:
+            return False, "OLLAMA_API_KEY is not set"
+        return await get_ollama_cloud_client().verify()
+    if backend == "anthropic":
+        return await get_anthropic_client().verify()
+    if backend == "openai":
+        ok = bool(settings_mod.OPENAI_API_KEY)
+        return ok, settings_mod.OPENAI_MODEL if ok else "OPENAI_API_KEY is not set"
+    return False, f"unknown backend '{backend}'"
+
+
+async def _choose_brain() -> None:
+    """Keep the configured brain if it works, else switch to the first one that does."""
+    from core.conversation.engine import configured_backends
+
+    active = settings_mod.LLM_BACKEND
+    ok, detail = await _brain_ok(active)
+    if ok:
+        logger.info("LLM backend: %s (%s)", active, detail)
+        return
+    logger.error("LLM backend '%s' is not usable: %s", active, detail)
+    for backend in configured_backends():
+        if backend == active:
+            continue
+        ok, detail = await _brain_ok(backend)
+        if ok:
+            settings_mod.LLM_BACKEND = backend
+            logger.warning("Using '%s' (%s) instead. Switch back in Settings once '%s' works.",
+                           backend, detail, active)
+            return
+        logger.warning("'%s' is not usable either: %s", backend, detail)
+    logger.error("No working AI brain. Add a valid key to .env "
+                 "(OLLAMA_API_KEY, ANTHROPIC_API_KEY or OPENAI_API_KEY).")
+
+
 async def _warm_up():
-    """Load the heavy models in the background so the first reply isn't slow."""
+    """Load the on-device models (sentiment, embeddings, Whisper) in the background."""
     loop = asyncio.get_running_loop()
     try:
         from core.emotion.text_sentiment import analyse_sentiment
@@ -163,18 +150,6 @@ async def _warm_up():
         logger.info("Warm-up: Whisper speech-to-text ready")
     except Exception as e:
         logger.warning("Warm-up (local models) failed: %s", e)
-    if settings_mod.LLM_BACKEND == "ollama":
-        try:
-            from core.llm.model_router import select_model
-            r = await get_ollama_client()._client.post(
-                "/api/generate",
-                json={"model": select_model("standard"), "keep_alive": "30m",
-                      "options": {"num_ctx": 4096}},  # must match chat requests
-                timeout=300,
-            )
-            logger.info("Warm-up: Ollama model loaded (%s)", r.status_code)
-        except Exception as e:
-            logger.warning("Warm-up (Ollama) failed: %s", e)
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
@@ -215,14 +190,11 @@ async def health():
             "ollama_cloud": s.OLLAMA_CLOUD_MODEL,
             "anthropic": s.ANTHROPIC_MODEL,
             "openai":    s.OPENAI_MODEL,
-        }.get(s.LLM_BACKEND, s.DEFAULT_MODEL),
+        }.get(s.LLM_BACKEND, "unknown"),
         "tts_backend": s.TTS_BACKEND,
         "ollama_cloud_key_set": bool(s.OLLAMA_API_KEY),
         "anthropic_key_set": bool(s.ANTHROPIC_API_KEY),
         "openai_key_set": bool(s.OPENAI_API_KEY),
         "elevenlabs_key_set": bool(s.ELEVENLABS_API_KEY),
     }
-    if s.LLM_BACKEND == "ollama":
-        client = get_ollama_client()
-        info["ollama"] = await client.is_available()
     return info

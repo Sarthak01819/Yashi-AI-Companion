@@ -6,7 +6,7 @@ Assembles system prompt + memory context + conversation history + user message.
 import logging
 from typing import List, Dict
 
-from config.settings import YASHI_NAME, YASHI_PERSONA, MAX_CONTEXT_MESSAGES
+from config.settings import YASHI_PERSONA, MAX_CONTEXT_MESSAGES
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ def build_system_prompt(
     cognitive_mode: str,
     user_message: str,
 ) -> str:
-    """Persona + emotional context + memory, shared by every backend."""
+    """System prompt: persona + emotional context + cognitive mode + memory."""
     emotion = emotion_state.get("current_emotion", "neutral")
     tone_instruction = EMOTION_TONE_MAP.get(emotion, EMOTION_TONE_MAP["neutral"])
     mode_instruction = COGNITIVE_MODE_INSTRUCTIONS.get(cognitive_mode, "")
@@ -105,35 +105,6 @@ def build_system_prompt(
 
     return "\n".join(system_parts)
 
-
-def build_prompt(
-    user_message: str,
-    conversation_history: List[Dict],
-    semantic_memories: List[tuple],
-    personal_facts: List[Dict],
-    recent_reflections: List[Dict],
-    emotion_state: Dict,
-    cognitive_mode: str = "standard",
-) -> tuple[str, str]:
-    """
-    Returns (system_prompt, user_prompt) — completion style, for Ollama /api/generate.
-    """
-    system_prompt = build_system_prompt(
-        semantic_memories, personal_facts, recent_reflections,
-        emotion_state, cognitive_mode, user_message,
-    )
-
-    parts = []
-
-    for msg in conversation_history[-MAX_CONTEXT_MESSAGES:]:
-        role_label = "User" if msg["role"] == "user" else YASHI_NAME
-        parts.append(f"{role_label}: {msg['content']}")
-
-    parts.append(f"User: {user_message}")
-    parts.append(f"{YASHI_NAME}:")
-
-    user_prompt = "\n".join(parts)
-    return system_prompt, user_prompt
 
 
 def build_chat_messages(

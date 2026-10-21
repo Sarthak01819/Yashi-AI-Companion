@@ -109,7 +109,6 @@ const VrmAvatar = lazy(() => import("./avatar/VrmAvatar"));
 const LLM_OPTIONS = [
   { id: "ollama_cloud", label: "Cloud", hint: "Kimi K3 · Ollama Cloud" },
   { id: "anthropic", label: "Claude", hint: "Anthropic API" },
-  { id: "ollama", label: "Local", hint: "llama3.2 · offline" },
   { id: "openai", label: "OpenAI", hint: "GPT-4o mini" },
 ];
 

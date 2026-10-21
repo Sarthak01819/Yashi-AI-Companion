@@ -168,24 +168,20 @@ def test_plugin_loader():
 
 # ── Prompt builder ─────────────────────────────────────────────────────────────
 def test_prompt_builder():
-    from core.llm.prompt_builder import build_prompt
-    sys_p, usr_p = build_prompt(
-        user_message="Tell me about yourself.",
-        conversation_history=[{"role":"user","content":"Hi"},{"role":"assistant","content":"Hello!"}],
+    from core.llm.prompt_builder import build_system_prompt, build_chat_messages
+    sys_p = build_system_prompt(
         semantic_memories=[("I like hiking", 0.85)],
         personal_facts=[{"category":"name","fact":"Alex","confidence":1.0}],
         recent_reflections=[],
         emotion_state={"current_emotion":"neutral","emotional_state":"stable"},
         cognitive_mode="standard",
+        user_message="Tell me about yourself.",
     )
-    assert "Yashi" in sys_p and "Alex" in sys_p
-    assert "Tell me about yourself" in usr_p
-
-# ── Model router ───────────────────────────────────────────────────────────────
-def test_model_router_with_models():
-    from core.llm.model_router import select_model, set_available_models
-    set_available_models(["phi3:mini","mistral:7b-instruct-v0.2-q4_K_M"])
-    assert "phi3" in select_model("light")
+    assert "Yashi" in sys_p and "Alex" in sys_p and "hiking" in sys_p
+    msgs = build_chat_messages("Tell me about yourself.",
+                               [{"role":"user","content":"Hi"},{"role":"assistant","content":"Hello!"}])
+    assert [m["role"] for m in msgs] == ["user", "assistant", "user"]
+    assert msgs[-1]["content"] == "Tell me about yourself."
 
 # ── Reply cleanup ─────────────────────────────────────────────────────────────
 def test_strip_emojis_and_emphasis():
@@ -203,6 +199,15 @@ def test_tts_serve_blocks_traversal():
     from app.routes.tts_serve import serve_tts
     for name in ["../../.env", r"..\..\.env", "../yashi.db", "missing.mp3"]:
         assert serve_tts(name).status_code == 404
+
+# ── Brains: cloud APIs only, fallback order follows configured keys ──────────
+def test_configured_backends_fallback_order(monkeypatch):
+    import config.settings as settings
+    from core.conversation.engine import configured_backends
+    monkeypatch.setattr(settings, "OLLAMA_API_KEY", "k")
+    monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "k")
+    assert configured_backends() == ["ollama_cloud", "openai"]
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

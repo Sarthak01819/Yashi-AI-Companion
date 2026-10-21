@@ -23,7 +23,7 @@ PORT = 8000
 FRONTEND_URL = os.getenv("YASHI_FRONTEND_URL", "http://localhost:5173")
 
 # ── LLM ───────────────────────────────────────────────────────────────────────
-# "ollama_cloud" | "ollama" (local) | "anthropic" (Claude) | "openai"
+# Cloud APIs only: "ollama_cloud" | "anthropic" (Claude) | "openai"
 LLM_BACKEND = "ollama_cloud"
 
 # ── Anthropic / Claude ────────────────────────────────────────────────────────
@@ -53,7 +53,6 @@ OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL    = "gpt-4o-mini"
 OPENAI_TIMEOUT  = 60
 
-OLLAMA_BASE_URL = "http://localhost:11434"
 
 # ── Ollama Cloud (big models on ollama.com, needs OLLAMA_API_KEY in .env) ─────
 # kimi-k3 tested most natural/human for chat; gemma4:31b is a fast alternative.
@@ -61,21 +60,11 @@ OLLAMA_API_KEY       = os.getenv("OLLAMA_API_KEY", "").strip()
 OLLAMA_CLOUD_URL     = "https://ollama.com"
 OLLAMA_CLOUD_MODEL   = os.getenv("OLLAMA_CLOUD_MODEL", "") or "kimi-k3"
 OLLAMA_CLOUD_TIMEOUT = 60
-OLLAMA_TIMEOUT  = 120
-MODEL_MAP = {
-    # llama3.2:3b (2 GB) runs fully on a 4 GB GTX 1650 and chats naturally.
-    "light":    "llama3.2:3b",
-    "standard": "llama3.2:3b",
-    "deep":     "llama3.2:3b",
-    "support":  "llama3.2:3b",
-}
-DEFAULT_MODEL  = "llama3.2:3b"
-FALLBACK_MODEL = "phi3:mini"
 
 LLM_MAX_TOKENS     = 350
 LLM_TEMPERATURE    = 0.8
 LLM_TOP_P          = 0.9
-LLM_REPEAT_PENALTY = 1.1
+
 
 # ── TTS ───────────────────────────────────────────────────────────────────────
 TTS_BACKEND         = "elevenlabs"

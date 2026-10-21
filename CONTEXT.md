@@ -19,7 +19,7 @@ being an AI when sincerely asked, and keep personal data on the user's machine.
 | Decision | Why |
 |---|---|
 | **Default brain: Ollama Cloud `kimi-k3`** | Compared 7 cloud models on the same emotional exchange; Kimi K3 read the most like a real friend (~2 s to first token). `glm-5.3-flash` leaked its reasoning; `mistral-large-4` was flat. |
-| **Local fallback `llama3.2:3b`** | Fits entirely in 4 GB VRAM. 7B models don't. Requires `num_ctx` 4096 — the model's default context allocates a 14 GB KV cache and OOMs. |
+| **Cloud APIs only (no local LLM)** | The local `llama3.2:3b` fallback was removed at the owner's request and Ollama uninstalled. Resilience now comes from falling back across configured cloud APIs (Ollama Cloud -> Claude -> OpenAI). Speech-to-text, sentiment and embeddings still run on-device. |
 | **Persona rewritten as "a close friend texting"** | The old persona ("AI companion and personal assistant") produced assistant-speak. Banned phrases, 1–3 sentences, react first, at most one question. Replies are also stripped of emojis and markdown emphasis server-side (models ignore the instruction sometimes, and TTS reads them aloud). |
 | **Chat turns, not a transcript** | Prompts used to be a `User:/Yashi:` text dump; real message turns made replies noticeably more natural. |
 | **Claude via the official SDK** | `claude-opus-5`, low effort, thinking disabled for voice latency. |
@@ -39,12 +39,14 @@ being an AI when sincerely asked, and keep personal data on the user's machine.
   rejected and the OpenAI account had no credit; pulled `llama3.2:3b`; fixed plugin hijacking,
   the Windows banner crash, the missing dev proxy, and silent OpenAI failures.
 - **Voice** — wake-word rework; Brave detection; on-device Whisper STT endpoint and listener.
-- **Ollama Cloud** — new default brain with automatic local fallback.
+- **Ollama Cloud** — new default brain (initially with a local `llama3.2:3b` fallback).
 - **3D avatar** — VRM avatar, expressions, lip-sync; crimson/white theme; AvatarSample_A.
 - **Refactor & hardening** — removed ~20 dead files/functions (legacy vanilla-JS UI, 2D avatar,
   unused routes and modules, Piper TTS, VAD), fixed the file-leak vulnerability and CORS, bound to
   localhost, single frontend, ElevenLabs concurrency fix, natural spring-based avatar motion,
   emoji/markdown stripping, GSAP UI, VN-style redesign, lazy-loaded 3D bundle, docs.
+- **API only** — uninstalled Ollama; removed the local backend, model router and warm-up;
+  brains now fall back across configured cloud APIs; prompts are chat turns only.
 
 ## Known limitations
 
@@ -54,7 +56,9 @@ being an AI when sincerely asked, and keep personal data on the user's machine.
 - Stripping `*` also removes a literal asterisk in maths ("5 * 3"); acceptable for chat.
 - Voice emotion (`voice_energy`) is supported by the fusion engine but not yet fed from the
   Whisper path.
-- First reply after a cold start can be slow while models load; startup warm-up mitigates it.
+- Yashi needs internet and at least one working brain key; there is no offline brain.
+- First reply after a cold start can be slow while on-device models (Whisper, sentiment,
+  embeddings) load; startup warm-up mitigates it.
 - ElevenLabs free tier: 10,000 characters/month.
 
 ## Ideas / next steps

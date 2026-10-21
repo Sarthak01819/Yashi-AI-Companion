@@ -19,14 +19,13 @@ router = APIRouter(prefix="/api/settings")
 
 SETTINGS_FILE = Path(__file__).resolve().parent.parent.parent / "config" / "settings.py"
 
-LLM_BACKENDS = ("ollama_cloud", "ollama", "anthropic", "openai")
+LLM_BACKENDS = ("ollama_cloud", "anthropic", "openai")
 TTS_BACKENDS = ("elevenlabs", "browser")
 
 LLM_LABELS = {
     "ollama_cloud": "Ollama Cloud",
     "anthropic": "Claude",
     "openai":    "OpenAI",
-    "ollama":    "Ollama",
 }
 TTS_LABELS = {
     "elevenlabs": "ElevenLabs AI Voice",
@@ -77,7 +76,7 @@ async def get_settings():
 
 @router.post("/llm/{backend}")
 async def set_llm_backend(backend: str):
-    """Switch LLM backend: ollama_cloud | ollama | anthropic | openai"""
+    """Switch LLM backend: ollama_cloud | anthropic | openai"""
     if backend not in LLM_BACKENDS:
         return JSONResponse(
             {"error": f"Invalid backend. Use one of {', '.join(LLM_BACKENDS)}"},

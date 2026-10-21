@@ -18,7 +18,7 @@ Two processes, one UI:
  │   /api/stt (Whisper) · /api/settings · /api/memory · /audio/tts  │
  └───────────────┬───────────────────────────┬──────────────────────┘
                  │                           │
-        data/yashi.db (SQLite)     Ollama Cloud / Ollama / Claude /
+        data/yashi.db (SQLite)     Ollama Cloud / Claude /
         data/tts_cache/*.mp3       OpenAI · ElevenLabs
 ```
 
@@ -40,8 +40,8 @@ app/                    FastAPI app
 config/settings.py      all defaults (models, limits, persona); reads .env
 core/
   conversation/engine.py  the per-message pipeline (below)
-  llm/                    ollama_client (local + cloud), anthropic_client, openai_client,
-                          prompt_builder, model_router (local model selection)
+  llm/                    ollama_client (Ollama Cloud), anthropic_client, openai_client,
+                          prompt_builder (system prompt + chat turns)
   emotion/                text_sentiment (DistilBERT), voice_energy, fusion_engine
   cognitive/              complexity_analyzer + mode_selector -> light/standard/deep/support
   memory/                 database (SQLite), conversation_store, semantic_memory (MiniLM
@@ -89,12 +89,14 @@ run.py · desktop.py       launchers
 
 | Backend | Client | Notes |
 |---|---|---|
-| `ollama_cloud` (default) | `OllamaClient` -> `https://ollama.com` + key | `kimi-k3`; `think: false`. If it fails before the first token, the engine answers with the local model instead. |
-| `ollama` | `OllamaClient` -> `localhost:11434` | `llama3.2:3b`, `/api/chat`, `num_ctx` 4096 (larger contexts OOM on 8 GB). Kept loaded 30 min. |
+| `ollama_cloud` (default) | `OllamaCloudClient` -> `https://ollama.com/api/chat` + key | `kimi-k3`, `think: false`. |
 | `anthropic` | official `anthropic` SDK | `claude-opus-5`, low effort, thinking off for latency. |
 | `openai` | `httpx` | `gpt-4o-mini`. Out-of-credit errors are not retried. |
 
 The active backend is read at call time, so switching in Settings applies to the next message.
+If the active brain fails before its first token, the engine tries the other brains that have
+a key, in the order Ollama Cloud -> Claude -> OpenAI. At startup the backend verifies the
+configured brain and switches to the first working one if needed. There is no local LLM.
 
 ### Voice out
 

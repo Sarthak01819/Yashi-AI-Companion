@@ -43,24 +43,3 @@ def get_narrative_thread(session_id: str, limit: int = 10):
     from core.memory.database import get_narrative
     return {"narrative": get_narrative(session_id, limit=limit)}
 
-
-@router.get("/debug/ollama")
-async def debug_ollama():
-    """Check Ollama status and show available models — visit this in browser to diagnose."""
-    from core.llm.ollama_client import get_ollama_client
-    from core.llm.model_router import select_model
-
-    client = get_ollama_client()
-    is_up = await client.is_available()
-    models = await client.list_models() if is_up else []
-
-    return {
-        "ollama_running":   is_up,
-        "available_models": models,
-        "model_for_standard": select_model("standard") if models else "none",
-        "model_for_light":    select_model("light")    if models else "none",
-        "instruction": (
-            "If available_models is empty: run 'ollama pull mistral' in your terminal. "
-            "If ollama_running is false: run 'ollama serve' in a separate terminal."
-        )
-    }

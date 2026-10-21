@@ -6,7 +6,7 @@ import uuid, re, time, logging, asyncio
 from typing import AsyncGenerator, Dict
 
 import config.settings as settings
-from core.llm.prompt_builder import build_prompt, build_chat_messages
+from core.llm.prompt_builder import build_system_prompt, build_chat_messages
 from core.memory.conversation_store import save_message, get_recent_messages
 from core.memory.semantic_memory import search_memory, store_memory, get_all_facts
 from core.memory.fact_extractor import extract_facts
@@ -22,7 +22,20 @@ logger = logging.getLogger(__name__)
 
 def current_backend() -> str:
     """Read the backend at call time so the sidebar toggle takes effect live."""
-    return getattr(settings, "LLM_BACKEND", "anthropic")
+    return getattr(settings, "LLM_BACKEND", "ollama_cloud")
+
+
+# Cloud brains in fallback order, with the .env key each one needs.
+BACKEND_KEYS = {
+    "ollama_cloud": "OLLAMA_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openai": "OPENAI_API_KEY",
+}
+
+
+def configured_backends() -> list:
+    """Backends that have an API key set, in fallback order."""
+    return [name for name, key in BACKEND_KEYS.items() if getattr(settings, key, "")]
 
 
 def _get_llm(backend: str = None):
@@ -30,14 +43,11 @@ def _get_llm(backend: str = None):
     if backend == "anthropic":
         from core.llm.anthropic_client import get_anthropic_client
         return get_anthropic_client()
-    if backend == "ollama_cloud":
-        from core.llm.ollama_client import get_ollama_cloud_client
-        return get_ollama_cloud_client()
     if backend == "openai":
         from core.llm.openai_client import get_openai_client
         return get_openai_client()
-    from core.llm.ollama_client import get_ollama_client
-    return get_ollama_client()
+    from core.llm.ollama_client import get_ollama_cloud_client
+    return get_ollama_cloud_client()
 
 
 
@@ -134,16 +144,14 @@ class ConversationEngine:
         facts         = get_all_facts()
         reflections   = get_recent_reflections(2)
 
-        system_prompt, user_prompt = build_prompt(
-            user_message=user_text,
-            conversation_history=history[:-1],
+        system_prompt = build_system_prompt(
             semantic_memories=semantic_mems,
             personal_facts=facts,
             recent_reflections=reflections,
             emotion_state=self.emotion_state,
             cognitive_mode=mode,
+            user_message=user_text,
         )
-        # Chat-shaped history for message-based backends (Claude / OpenAI).
         chat_messages = build_chat_messages(user_text, history[:-1])
 
         full_response = ""
@@ -163,7 +171,7 @@ class ConversationEngine:
 
         try:
             async for token in self._stream_with_fallback(
-                prompt=user_prompt, system=system_prompt, mode=mode,
+                prompt=user_text, system=system_prompt, mode=mode,
                 messages=chat_messages,
             ):
                 if self._stop_event.is_set():
@@ -289,45 +297,48 @@ class ConversationEngine:
 
     async def _stream_with_fallback(self, **kwargs):
         """
-        Stream from the active backend. If Ollama Cloud fails before saying
-        anything (offline, usage cap, outage), answer with the local model.
+        Stream from the active brain. If it fails before saying anything
+        (outage, usage cap, bad key), try the other configured cloud APIs.
         """
         produced = False
         try:
             async for token in self.llm.generate_stream(**kwargs):
                 produced = True
                 yield token
+            return
         except Exception as e:
-            if self._backend != "ollama_cloud" or produced or self._stop_event.is_set():
+            if produced or self._stop_event.is_set():
                 raise
-            logger.warning("Ollama Cloud failed (%s) — answering with local %s",
-                           e, settings.DEFAULT_MODEL)
-            from core.llm.ollama_client import get_ollama_client
-            async for token in get_ollama_client().generate_stream(**kwargs):
-                yield token
+            first_error = e
+
+        for backend in configured_backends():
+            if backend == self._backend:
+                continue
+            logger.warning("%s failed (%s) — trying %s", self._backend, first_error, backend)
+            try:
+                async for token in _get_llm(backend).generate_stream(**kwargs):
+                    produced = True
+                    yield token
+                return
+            except Exception as e:
+                if produced or self._stop_event.is_set():
+                    raise
+                logger.warning("%s failed too: %s", backend, e)
+        raise first_error
 
     def _error_msg(self, e) -> str:
         s = str(e)
         name = type(e).__name__
-        key_var = {
-            "anthropic": "ANTHROPIC_API_KEY",
-            "openai":    "OPENAI_API_KEY",
-            "ollama_cloud": "OLLAMA_API_KEY",
-        }.get(self._backend)
+        key_var = BACKEND_KEYS.get(self._backend, "API key")
         if "401" in s or "authentication" in s.lower():
-            return (f"API key issue. Check your {key_var} in .env"
-                    if key_var else "The local model rejected the request.")
+            return f"API key issue. Check your {key_var} in .env"
         if "insufficient_quota" in s or "credit" in s.lower() or "billing" in s.lower():
             return ("The AI account is out of credit. Add credit, or switch the Brain "
-                    "in AI Settings to a backend that works.")
+                    "in Settings to another API.")
         if "429" in s or "rate_limit" in s.lower():
             return "Rate limited. Please wait a moment."
-        if "credit" in s.lower() or "billing" in s.lower():
-            return "The AI account is out of credit. Check your Anthropic billing."
         if "ConnectError" in name or "APIConnectionError" in name:
             return "Can't reach the AI server. Check your connection."
-        if self._backend == "ollama" and ("model" in s.lower() and "not found" in s.lower()):
-            return "That local model isn't installed. Run: ollama pull phi3:mini"
         return f"Something went wrong ({name}). Check the terminal."
 
     async def _reflect(self):

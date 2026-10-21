@@ -6,7 +6,8 @@ a natural voice, and reacts on screen — smiling, frowning, nodding, and lip-sy
 
 - **3D avatar** (VRM) with mood-driven expressions, lip-sync, blinking, breathing and gaze.
 - **Interactive**: click her for a headpat, or use *Tease* / *Cheer*; a heart meter follows her mood.
-- **Brains you can switch at runtime**: Ollama Cloud (default), Claude, a local Ollama model, or OpenAI.
+- **Cloud brains you can switch at runtime**: Ollama Cloud (default), Claude or OpenAI — if one
+  fails, Yashi automatically tries the next one you have a key for. No local LLM install needed.
 - **Voice**: ElevenLabs (natural) with a browser-voice fallback; speech input via the browser or
   on-device Whisper (works in Brave and offline).
 - **Memory**: conversation history, personal facts, semantic search and periodic reflections (SQLite).
@@ -23,10 +24,10 @@ project decisions and history.
 |---|---|
 | Python | 3.11+ (developed on 3.13) |
 | Node.js | 20+ (developed on 22) |
-| Ollama | [ollama.com/download](https://ollama.com/download) — for the offline fallback brain |
 | Browser | Chrome, Edge or Brave (desktop) |
 
-Hardware that runs it comfortably: 8 GB RAM, a 4 GB GPU (e.g. GTX 1650) for the local model.
+Hardware: any PC with ~8 GB RAM. The AI brain runs in the cloud; only speech-to-text (Whisper),
+sentiment and memory embeddings run on your machine (CPU).
 
 ## Setup
 
@@ -39,14 +40,11 @@ pip install -r requirements.txt
 # 2. Frontend packages
 cd frontend && npm install && cd ..
 
-# 3. Local fallback model (used when the cloud brain is unreachable)
-ollama pull llama3.2:3b
-
-# 4. Keys
+# 3. Keys
 copy .env.example .env          # Linux/macOS: cp .env.example .env
 ```
 
-Fill in `.env` (all optional except one brain):
+Fill in `.env` — at least one brain key is required:
 
 | Variable | What it does |
 |---|---|
@@ -56,7 +54,7 @@ Fill in `.env` (all optional except one brain):
 | `OPENAI_API_KEY` | OpenAI brain |
 | `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, `ELEVENLABS_MODEL` | Natural voice |
 
-Without any cloud key, Yashi still runs fully offline on `llama3.2:3b` with the browser voice.
+Without an ElevenLabs key, Yashi speaks with the browser's built-in voice.
 
 ## Run
 
@@ -102,7 +100,7 @@ python -m pytest tests -q
 - The backend listens on `127.0.0.1` only and accepts API calls only from the Yashi app
   (CORS-restricted) — it can open apps and files, so it is never exposed to your network.
 - Memory lives in `data/yashi.db` on your machine. Cloud brains (Ollama Cloud, Claude, OpenAI)
-  and ElevenLabs receive the conversation text; the local model and Whisper do not send anything.
+  and ElevenLabs receive the conversation text; speech-to-text (Whisper) runs on your PC.
 - `.env`, the database and the TTS cache are git-ignored.
 
 ## Credits & licence
