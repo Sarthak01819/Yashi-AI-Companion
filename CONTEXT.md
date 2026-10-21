@@ -25,11 +25,16 @@ being an AI when sincerely asked, and keep personal data on the user's machine.
 | **Claude via the official SDK** | `claude-opus-5`, low effort, thinking disabled for voice latency. |
 | **On-device Whisper for voice in Brave** | Brave blocks Google's speech service behind `webkitSpeechRecognition` (every attempt fails with `network`). Whisper `base` + hotword "Yashi" transcribed every test clip correctly; without the hotword it heard "Yasi"/"Yossi". |
 | **Wake word acts on final sentences only** | Acting on interim results caused a ~1 s mic hand-off gap that swallowed the command — the "say Yashi many times" bug. |
+| **Acoustic wake check (Whisper forced alignment)** | Text matching alone missed a lone "Yashi" (heard as "Yes she" or dropped) and false-fired on lookalikes. Scoring the audio for the "Yashi" tokens gets the Alexa-like behaviour without training a custom keyword model: 40/40 correct on clean + noisy synthetic speech. A dedicated keyword-spotting model (openWakeWord / Porcupine) would be the next step for always-on, low-CPU listening. |
+| **Persona lives in the DB, edited from the Dashboard** | It used to be a hard-coded string in `settings.py`. Now it's structured (traits, role, style, likes, story, custom instructions) and compiled into the prompt every message, so edits apply to the very next reply. |
+| **Memory stores only the user's words** | Storing "User: … \| Yashi: …" made her repeat her own old replies and drift back to the old personality after an edit. |
+| **`X-Yashi` header on mutating routes** | The Dashboard can write API keys to `.env`; without a CSRF guard any website could have done the same through the browser. |
+| **English-only UI** | Japanese sub-labels were removed at the owner's request; the romaji talking style stays as an opt-in persona option. |
 | **ElevenLabs capped at 2 concurrent requests** | Free plan concurrency is 2; parallel per-sentence synthesis got HTTP 429 and fell back to the robotic browser voice mid-reply. |
 | **VRM avatar (AvatarSample_A)** | VRM has standard expressions + visemes, runs in the browser via three-vrm, and the official VRoid samples are free for any use. A custom VRoid Studio model can be dropped into `frontend/public/models/` and listed first in `MODEL_URLS`. |
 | **One frontend** | The backend used to serve a stale built copy of the UI on :8000. Now the Vite app is the only UI and the backend is API-only. |
 | **Localhost-only backend** | The API can launch apps and touch files. It previously listened on `0.0.0.0` with `allow_origins=["*"]` and leaked `.env` and the memory DB through `/static/..%2F.env`. Fixed and covered by a test. |
-| **UI: visual-novel / game style** | Crimson + white palette, black stage behind the model, slanted nameplate and buttons, JP sub-labels, mood heart meter, headpat/tease/cheer reactions. GSAP only where motion explains a change; respects reduced-motion. |
+| **UI: visual-novel / game style** | Crimson + white palette, black stage behind the model, slanted nameplate and buttons, mood heart meter, headpat/tease/cheer reactions. GSAP only where motion explains a change; respects reduced-motion. |
 
 ## History
 
@@ -47,6 +52,11 @@ being an AI when sincerely asked, and keep personal data on the user's machine.
   emoji/markdown stripping, GSAP UI, VN-style redesign, lazy-loaded 3D bundle, docs.
 - **API only** — uninstalled Ollama; removed the local backend, model router and warm-up;
   brains now fall back across configured cloud APIs; prompts are chat turns only.
+- **Dashboard** — RPG-style user profile (levels, XP, streak, check-ins, radar), persona editor
+  in a glass "home screen" style, Brain & Keys page; persona and profile injected into the
+  prompt; CSRF header; fact-extractor fixes ("name: going" junk).
+- **Voice & stage polish** — acoustic wake-word check, drag-to-rotate avatar, focus-mode chat
+  hide/show, English-only UI.
 
 ## Known limitations
 
@@ -60,6 +70,13 @@ being an AI when sincerely asked, and keep personal data on the user's machine.
 - First reply after a cold start can be slow while on-device models (Whisper, sentiment,
   embeddings) load; startup warm-up mitigates it.
 - ElevenLabs free tier: 10,000 characters/month.
+- Not deployable as-is on Vercel or other static/serverless hosts: the backend needs WebSockets,
+  on-device models, a writable SQLite file and local app control. Vercel can serve the frontend
+  only, which then has no backend to talk to.
+- The wake threshold was calibrated on Windows synthetic voices, not real recordings; tune
+  `WAKE_THRESHOLD` per mic/room. Yashi can't be interrupted by her name while she is speaking.
+- The acoustic check only runs on the Whisper path (Brave / desktop); Chrome's Web Speech path
+  still uses text matching.
 
 ## Ideas / next steps
 
@@ -67,3 +84,6 @@ being an AI when sincerely asked, and keep personal data on the user's machine.
 - A custom Yashi model made in VRoid Studio (silver hair like the original video avatar).
 - Arm gestures (wave on greeting) — needs authored poses beyond the procedural layer.
 - Persist chat sessions in the browser and show history on load.
+- Barge-in: listen for "Yashi" while she talks (louder threshold + echo cancellation) and stop
+  her voice.
+- Hosted mode: backend on a VPS/Render with auth, frontend on Vercel pointing at it.

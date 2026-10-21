@@ -11,7 +11,12 @@ a natural voice, and reacts on screen — smiling, frowning, nodding, and lip-sy
 - **Voice**: ElevenLabs (natural) with a browser-voice fallback; speech input via the browser or
   on-device Whisper (works in Brave and offline).
 - **Memory**: conversation history, personal facts, semantic search and periodic reflections (SQLite).
-- **Wake word**: say "Yashi" hands-free.
+- **Wake word**: say "Yashi" hands-free. The audio itself is checked for her name, so a mumbled
+  "Yashi" still wakes her and soundalikes ("yes she", "Yoshi") don't.
+- **Dashboard**: an animated, game-style profile for you (levels, XP, streaks, daily check-ins,
+  stats radar), a personality editor for Yashi (presets, trait sliders, talking style, custom
+  instructions with a live preview of what she is told), and a page to set API keys and models.
+- **Grab to spin**: drag the 3D model to turn her 360°; double-click to face front again.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for how it fits together and [CONTEXT.md](CONTEXT.md) for
 project decisions and history.
@@ -56,6 +61,12 @@ Fill in `.env` — at least one brain key is required:
 
 Without an ElevenLabs key, Yashi speaks with the browser's built-in voice.
 
+Keys and models can also be set later from **Dashboard -> Brain & Keys**; they are written to the
+same `.env` and take effect immediately.
+
+Optional: `WAKE_THRESHOLD` (default `0.007`) tunes the wake word. Lower it if she misses you,
+raise it if she wakes on her own. Restart after changing it.
+
 ## Run
 
 ```bash
@@ -78,15 +89,33 @@ visiting `:8000` redirects to the app.
 - **Wake word** — click *Wake word*, then say "Yashi", wait for the chime and talk — or say it in
   one breath ("Yashi, how was your day?").
 - **Reactions** — click Yashi for a headpat; *Tease* makes her pout, *Cheer* makes her light up.
-- **Focus** — full-screen stage with the chat floating on top.
+- **Focus** — full-screen stage with the chat floating on top; the arrow tab hides the chat so
+  only Yashi is on screen, and brings it back.
+- **Spin** — grab Yashi and drag to rotate her; double-click to reset.
 - **Settings** — switch brain and voice, and open memory (facts, reflections) and health check.
+- **Dashboard** (`#/dashboard`, button in the top bar):
+  - *My Profile* — your name, photo, motto, interests and goals (Yashi uses them in
+    conversation), level and XP from chatting, daily streak, and a daily energy check-in.
+  - *Yashi* — her name, role, personality presets (Sunny, Senpai, Tsundere, Gremlin, Healer),
+    trait sliders, reply length, how often she asks questions, likes, backstory and custom
+    instructions. Changes apply to her next reply.
+  - *Brain & Keys* — paste or replace API keys (shown masked), test each provider, pick the
+    active brain and model, and switch the voice.
 - **Commands** — "open notepad", "play lofi on spotify", "search the web for …", "find file
   report.pdf". Ordinary sentences always go to the conversation, not to commands.
 
 ## Configuration
 
-`config/settings.py` holds the defaults (model names, memory limits, safety limits, persona).
+`config/settings.py` holds the defaults (model names, memory limits, safety limits).
 The brain/voice picked in *Settings* is applied immediately and saved back to this file.
+Yashi's personality and your profile are edited in the Dashboard and stored in the database.
+
+## Hosting (Vercel etc.)
+
+Yashi is a local app. Vercel can host the `frontend/` build, but not the backend: it needs a
+long-running process with WebSockets, on-device models (Whisper, sentiment, embeddings), a
+writable SQLite file, and it can open apps on your PC. A Vercel deployment on its own therefore
+shows the UI but cannot chat. Run it with `python run.py` (or `python desktop.py`).
 
 ## Tests
 
@@ -99,6 +128,9 @@ python -m pytest tests -q
 
 - The backend listens on `127.0.0.1` only and accepts API calls only from the Yashi app
   (CORS-restricted) — it can open apps and files, so it is never exposed to your network.
+  Every request that changes something must carry the app's `X-Yashi` header, so another
+  website open in your browser can't silently change keys or settings.
+- API keys are only ever shown masked in the UI.
 - Memory lives in `data/yashi.db` on your machine. Cloud brains (Ollama Cloud, Claude, OpenAI)
   and ElevenLabs receive the conversation text; speech-to-text (Whisper) runs on your PC.
 - `.env`, the database and the TTS cache are git-ignored.
