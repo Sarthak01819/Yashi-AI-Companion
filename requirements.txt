@@ -18,3 +18,10 @@ faster-whisper>=1.0.0
 
 # ── Plugins (media keys for Spotify control) ──────────────────────────────────
 pynput>=1.7.6
+
+# Desktop app (desktop.py): native window. pythonnet 3.2+ is needed on Python 3.13.
+pywebview>=6.1
+pythonnet>=3.2.1; sys_platform == "win32"
+
+# PC control (core/actions): keyboard + driving Yashi's browser (uses your installed Chrome)
+playwright>=1.55

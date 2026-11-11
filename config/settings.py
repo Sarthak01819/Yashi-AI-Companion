@@ -60,6 +60,9 @@ OLLAMA_API_KEY       = os.getenv("OLLAMA_API_KEY", "").strip()
 OLLAMA_CLOUD_URL     = "https://ollama.com"
 OLLAMA_CLOUD_MODEL   = os.getenv("OLLAMA_CLOUD_MODEL", "") or "kimi-k3"
 OLLAMA_CLOUD_TIMEOUT = 60
+# Model that turns commands into PC actions. Empty = same as the chat model.
+# A strong instruction-follower (e.g. gpt-oss:120b) works best here.
+ACTION_MODEL         = os.getenv("ACTION_MODEL", "").strip()
 
 LLM_MAX_TOKENS     = 350
 LLM_TEMPERATURE    = 0.8

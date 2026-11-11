@@ -12,9 +12,12 @@ import { AvatarMotion, EMOTION_FACES } from "./avatarMotion";
 const MODEL_URLS = ["/models/AvatarSample_A.vrm"];
 
 
-const VrmAvatar = forwardRef(function VrmAvatar({ fallback = null, className = "" }, ref) {
+const VrmAvatar = forwardRef(function VrmAvatar({ fallback = null, className = "", closeUp = false }, ref) {
   const mountRef = useRef(null);
   const [status, setStatus] = useState("loading");   // loading | ready | failed
+  // Focus mode: a head-and-chest close-up instead of the upper body.
+  const closeUpRef = useRef(closeUp);
+  closeUpRef.current = closeUp;
 
   // Mutable animation state, read every frame (no React re-renders).
   const live = useRef({
@@ -121,23 +124,39 @@ const VrmAvatar = forwardRef(function VrmAvatar({ fallback = null, className = "
     // Upper-body framing, recomputed on resize.
     let headY = 1.35;
     let framedSize = "";
-    function frameCamera() {
-      const width = mount.clientWidth || 1;
-      const height = mount.clientHeight || 1;
-      framedSize = `${width}x${height}`;
-      renderer.setSize(width, height, false);
-      renderer.domElement.style.width = "100%";
-      renderer.domElement.style.height = "100%";
-      camera.aspect = width / height;
-      // Frame by visible HEIGHT, scaled with the container: the small sidebar
-      // card shows head and shoulders, the big focus view shows the upper body.
+    let framedCloseUp = closeUpRef.current;
+    let span = 0;             // visible height in metres, eased toward targetSpan
+    let targetSpan = 0.75;
+
+    function placeCamera() {
       // headY is the head bone (base of the skull); the hair top is ~22 cm above it.
-      const span = THREE.MathUtils.clamp(height / 850, 0.6, 0.9);
       const distance = span / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
       const centerY = headY + 0.24 - span / 2;
       camera.position.set(0, centerY + 0.05, distance);
       camera.lookAt(0, centerY, 0);
+    }
+
+    function frameCamera() {
+      const width = mount.clientWidth || 1;
+      const height = mount.clientHeight || 1;
+      framedSize = `${width}x${height}`;
+      framedCloseUp = closeUpRef.current;
+      renderer.setSize(width, height, false);
+      renderer.domElement.style.width = "100%";
+      renderer.domElement.style.height = "100%";
+      camera.aspect = width / height;
       camera.updateProjectionMatrix();
+      // Frame by visible HEIGHT. Normally it scales with the container: the
+      // small sidebar card shows head and shoulders, a big stage the upper
+      // body. Focus mode is a close-up from the hair to the chest. On a narrow
+      // portrait screen keep at least her shoulders (~0.45 m) in the width.
+      targetSpan = framedCloseUp
+        ? Math.max(0.5, 0.45 / camera.aspect)
+        : THREE.MathUtils.clamp(height / 850, 0.6, 0.9);
+      if (!span) {
+        span = targetSpan;
+        placeCamera();
+      }
     }
 
     // Eyes follow the pointer a little; otherwise look at the viewer.
@@ -234,6 +253,7 @@ const VrmAvatar = forwardRef(function VrmAvatar({ fallback = null, className = "
           headY = new THREE.Vector3().setFromMatrixPosition(head.matrixWorld).y;
         }
         frameCamera();
+        placeCamera();                       // headY changed: re-aim right away
         setStatus("ready");
       })
       .catch((error) => {
@@ -263,8 +283,14 @@ const VrmAvatar = forwardRef(function VrmAvatar({ fallback = null, className = "
       }
       // Re-frame whenever the container changes size (focus mode, window
       // resize, mobile rotation). Checked per frame: cheap and never misses.
-      if (`${mount.clientWidth}x${mount.clientHeight}` !== framedSize) frameCamera();
+      if (`${mount.clientWidth}x${mount.clientHeight}` !== framedSize
+          || closeUpRef.current !== framedCloseUp) frameCamera();
       const delta = Math.min(clock.getDelta(), 0.1);
+      // Glide into / out of the close-up instead of cutting.
+      if (Math.abs(targetSpan - span) > 0.0005) {
+        span += (targetSpan - span) * (1 - Math.exp(-delta * 5));
+        placeCamera();
+      }
       if (vrm && motion) {
         const state = live.current;
         state.loudness = state.speaking ? readLoudness(state) : null;

@@ -80,16 +80,18 @@ def test_mode_selector_support():
     assert mode == "support"
 
 # ── Safety ─────────────────────────────────────────────────────────────────────
-def test_safety_clean(tmp_path):
-    from config import settings as s; s.DATABASE_PATH = tmp_path/"s.db"
-    from core.memory.database import initialize_database; initialize_database()
+def test_safety_clean(tmp_path, monkeypatch):
+    # database.py copies DATABASE_PATH at import, so patch it there (not in settings),
+    # or the test writes into the real data/yashi.db.
+    from core.memory import database
+    monkeypatch.setattr(database, "DATABASE_PATH", tmp_path/"s.db"); database.initialize_database()
     from core.safety.safety_monitor import check_message
     r = check_message("How's the weather?", {"emotional_state":"stable","current_emotion":"neutral"}, "sess1")
     assert r["should_respond"] and r["severity"] == "none"
 
-def test_safety_dependency(tmp_path):
-    from config import settings as s; s.DATABASE_PATH = tmp_path/"d.db"
-    from core.memory.database import initialize_database; initialize_database()
+def test_safety_dependency(tmp_path, monkeypatch):
+    from core.memory import database
+    monkeypatch.setattr(database, "DATABASE_PATH", tmp_path/"d.db"); database.initialize_database()
     from core.safety.safety_monitor import check_message
     r = check_message("you're the only one who understands me",{"emotional_state":"stable","current_emotion":"neutral"},"sess2")
     assert r["severity"] == "gentle"
@@ -98,76 +100,13 @@ def test_filter_response():
     from core.safety.safety_monitor import filter_response
     assert "you need me" not in filter_response("Here to support you.").lower()
 
-# ── Intent / Plugin ────────────────────────────────────────────────────────────
-def test_intent_open_app():
-    from plugins.intent_detector import detect_intent
-    r = detect_intent("open Chrome")
-    assert r and r["intent"] == "open_app"
-
-def test_intent_web_search():
-    from plugins.intent_detector import detect_intent
-    r = detect_intent("search the web for Python tutorials")
-    assert r and r["intent"] == "open_url"
-
-def test_intent_youtube_search_open_and_search():
-    from plugins.intent_detector import detect_intent
-    r = detect_intent("open youtube and search lofi coding music")
-    assert r and r["intent"] == "youtube_search"
-    assert "lofi coding music" in r["target"].lower()
-
-def test_intent_youtube_search_on_site():
-    from plugins.intent_detector import detect_intent
-    r = detect_intent("search lofi hip hop on youtube")
-    assert r and r["intent"] == "youtube_search"
-    assert "lofi hip hop" in r["target"].lower()
-
-def test_intent_open_website_on_browser():
-    from plugins.intent_detector import detect_intent
-    r = detect_intent("open github on browser")
-    assert r and r["intent"] == "open_website"
-    assert r["target"].lower() == "github"
-
-def test_intent_open_website_phrase_variant():
-    from plugins.intent_detector import detect_intent
-    r = detect_intent("open website reddit")
-    assert r and r["intent"] == "open_website"
-    assert r["target"].lower() == "reddit"
-
-def test_spotify_generic_target_detection():
-    from plugins.app_launcher.plugin import _is_generic_spotify_target
-    assert _is_generic_spotify_target("any music")
-    assert _is_generic_spotify_target("playlist")
-    assert not _is_generic_spotify_target("shape of you")
-
-def test_intent_find_file():
-    from plugins.intent_detector import detect_intent
-    r = detect_intent("find file report.pdf")
-    assert r and r["intent"] == "find_file"
-
-def test_intent_file_write():
-    from plugins.intent_detector import detect_intent
-    r = detect_intent("write Hello world to file notes.txt")
-    assert r and r["intent"] == "file_write"
-    assert r["extra"].lower() == "notes.txt"
-
-def test_intent_file_append():
-    from plugins.intent_detector import detect_intent
-    r = detect_intent("append another line to file notes.txt")
-    assert r and r["intent"] == "file_append"
-
-def test_intent_no_match():
-    from plugins.intent_detector import detect_intent
-    assert detect_intent("How are you feeling today?") is None
-
-def test_plugin_loader():
-    from plugins.plugin_loader import load_all_plugins
-    names = [p.name for p in load_all_plugins()]
-    assert "app_launcher" in names
-    assert "web_launcher" in names
-    assert "file_search" in names
-
 # ── Prompt builder ─────────────────────────────────────────────────────────────
-def test_prompt_builder():
+def test_prompt_builder(monkeypatch):
+    # Default persona and an empty profile, not whatever is saved on this PC.
+    import core.llm.prompt_builder as pb
+    from core.personalization import persona, profile
+    monkeypatch.setattr(pb.persona_store, "load", lambda: dict(persona.DEFAULT_PERSONA))
+    monkeypatch.setattr(pb, "load_profile", lambda: dict(profile.DEFAULT_PROFILE))
     from core.llm.prompt_builder import build_system_prompt, build_chat_messages
     sys_p = build_system_prompt(
         semantic_memories=[("I like hiking", 0.85)],
@@ -211,3 +150,24 @@ def test_configured_backends_fallback_order(monkeypatch):
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])
+
+
+def test_desktop_ui_serving_blocks_traversal(monkeypatch):
+    """Desktop mode serves frontend/dist; it must never expose files outside it."""
+    import importlib
+    from pathlib import Path
+    from fastapi.testclient import TestClient
+    if not (Path(__file__).resolve().parent.parent / "frontend" / "dist" / "index.html").exists():
+        import pytest
+        pytest.skip("frontend not built")
+    monkeypatch.setenv("YASHI_SERVE_UI", "1")
+    import app.main as main
+    main = importlib.reload(main)
+    try:
+        client = TestClient(main.app)
+        assert "text/html" in client.get("/").headers["content-type"]
+        for path in ("/..%2F.env", "/assets/..%2F..%2F..%2F.env", "/..%2Fdata%2Fyashi.db"):
+            assert client.get(path).status_code == 404
+    finally:
+        monkeypatch.delenv("YASHI_SERVE_UI")
+        importlib.reload(main)

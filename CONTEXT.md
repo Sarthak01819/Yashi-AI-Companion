@@ -18,7 +18,7 @@ being an AI when sincerely asked, and keep personal data on the user's machine.
 
 | Decision | Why |
 |---|---|
-| **Default brain: Ollama Cloud `kimi-k3`** | Compared 7 cloud models on the same emotional exchange; Kimi K3 read the most like a real friend (~2 s to first token). `glm-5.3-flash` leaked its reasoning; `mistral-large-4` was flat. |
+| **Default brain: Ollama Cloud `kimi-k3`** | Compared 7 cloud models on the same emotional exchange; Kimi K3 read the most like a real friend (~2 s to first token). `glm-5.3-flash` leaked its reasoning; `mistral-large-4` was flat. Kimi K3 is not in Ollama's Free plan (HTTP 402); on a Free key `gemma4:31b` gave the most friend-like replies of the free models (`gpt-oss:120b` is faster but more assistant-like). |
 | **Cloud APIs only (no local LLM)** | The local `llama3.2:3b` fallback was removed at the owner's request and Ollama uninstalled. Resilience now comes from falling back across configured cloud APIs (Ollama Cloud -> Claude -> OpenAI). Speech-to-text, sentiment and embeddings still run on-device. |
 | **Persona rewritten as "a close friend texting"** | The old persona ("AI companion and personal assistant") produced assistant-speak. Banned phrases, 1–3 sentences, react first, at most one question. Replies are also stripped of emojis and markdown emphasis server-side (models ignore the instruction sometimes, and TTS reads them aloud). |
 | **Chat turns, not a transcript** | Prompts used to be a `User:/Yashi:` text dump; real message turns made replies noticeably more natural. |
@@ -32,9 +32,15 @@ being an AI when sincerely asked, and keep personal data on the user's machine.
 | **English-only UI** | Japanese sub-labels were removed at the owner's request; the romaji talking style stays as an opt-in persona option. |
 | **ElevenLabs capped at 2 concurrent requests** | Free plan concurrency is 2; parallel per-sentence synthesis got HTTP 429 and fell back to the robotic browser voice mid-reply. |
 | **VRM avatar (AvatarSample_A)** | VRM has standard expressions + visemes, runs in the browser via three-vrm, and the official VRoid samples are free for any use. A custom VRoid Studio model can be dropped into `frontend/public/models/` and listed first in `MODEL_URLS`. |
-| **One frontend** | The backend used to serve a stale built copy of the UI on :8000. Now the Vite app is the only UI and the backend is API-only. |
+| **One frontend** | The backend used to serve a stale built copy of the UI on :8000. Now the Vite app is the only UI: in development the backend is API-only, and the Windows app serves that app's production build, rebuilt on launch whenever the source is newer, so it can't go stale. |
 | **Localhost-only backend** | The API can launch apps and touch files. It previously listened on `0.0.0.0` with `allow_origins=["*"]` and leaked `.env` and the memory DB through `/static/..%2F.env`. Fixed and covered by a test. |
 | **UI: visual-novel / game style** | Crimson + white palette, black stage behind the model, slanted nameplate and buttons, mood heart meter, headpat/tease/cheer reactions. GSAP only where motion explains a change; respects reduced-motion. |
+| **Windows app: pywebview window over an in-process backend** | One window, no terminal, and closing it stops everything. WebView2 already ships with Windows, so there's no Electron-sized download. The taskbar shows Yashi's icon only with an explicit AppUserModelID on both the process and the shortcut, plus the WinForms window icon. |
+| **Mic on at launch** | The owner wanted hands-free use. The desktop window grants the microphone to Yashi's own page only, and the UI switches the mic on once the chat connects (`/?mic=1`). |
+| **PC control: LLM planner over a fixed tool registry** | Replaced the regex `plugins/`, which hijacked normal chat and still targeted Spotify. A keyword gate keeps plain chat from paying for planning, the planner answers in JSON, and `validate()` drops unknown tools and arguments. One-word media commands skip the LLM. |
+| **Messages and power actions need a yes** | The owner's rule: Yashi never messages anyone without permission. `confirm=True` tools ask first, and WhatsApp re-checks the open chat's name right before sending. |
+| **YouTube Music and WhatsApp Web in Yashi's own Chrome** | No Spotify Premium (its playback API requires it) and no WhatsApp API for personal accounts. A separate Chrome profile keeps those logins away from the owner's main browser; Playwright attaches over the DevTools port. |
+| **Origin check on the chat WebSocket** | Browsers don't apply CORS to WebSockets. Once the socket could run PC actions, any website could otherwise have driven the PC through Yashi. |
 
 ## History
 
@@ -57,6 +63,10 @@ being an AI when sincerely asked, and keep personal data on the user's machine.
   prompt; CSRF header; fact-extractor fixes ("name: going" junk).
 - **Voice & stage polish** — acoustic wake-word check, drag-to-rotate avatar, focus-mode chat
   hide/show, English-only UI.
+- **Windows app & PC control** — pywebview desktop app with a Desktop/Start Menu shortcut and
+  icon, mic on at launch, closer focus-mode camera; PC control (apps, windows, keyboard, volume,
+  power, files, web search, YouTube, YouTube Music, WhatsApp Web) with confirmations; WebSocket
+  Origin check; removed `plugins/`.
 
 ## Known limitations
 
@@ -77,6 +87,13 @@ being an AI when sincerely asked, and keep personal data on the user's machine.
   `WAKE_THRESHOLD` per mic/room. Yashi can't be interrupted by her name while she is speaking.
 - The acoustic check only runs on the Whisper path (Brave / desktop); Chrome's Web Speech path
   still uses text matching.
+- WhatsApp Web and YouTube Music are driven through their web pages, so a redesign of either
+  site can break the selectors or player calls until they're updated. WhatsApp sending has only
+  been tested up to the login (QR) screen.
+- While Yashi's browser is open, its DevTools port (127.0.0.1:9223) is usable by any program on
+  this PC, and that browser holds the WhatsApp session.
+- PC control can't click arbitrary buttons inside other apps; it launches, focuses, types and
+  uses the web pages above. That would need screenshot-based control.
 
 ## Ideas / next steps
 
@@ -87,3 +104,5 @@ being an AI when sincerely asked, and keep personal data on the user's machine.
 - Barge-in: listen for "Yashi" while she talks (louder threshold + echo cancellation) and stop
   her voice.
 - Hosted mode: backend on a VPS/Render with auth, frontend on Vercel pointing at it.
+- Spotify control as an alternative to YouTube Music (its Web API needs Premium).
+- Screenshot-based control for apps that have no keyboard or web route.

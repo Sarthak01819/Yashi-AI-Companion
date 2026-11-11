@@ -42,3 +42,9 @@ Thumbs.db
 
 # The venv rule above also matches this on case-insensitive filesystems.
 !frontend/src/lib/
+
+# Desktop app browser storage
+data/webview/
+
+# Yashi's browser profile: holds your WhatsApp / YouTube logins
+data/yashi-browser/

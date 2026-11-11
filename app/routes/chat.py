@@ -1,5 +1,6 @@
 """
-Chat WebSocket route — handles text messages and plugin dispatch.
+Chat WebSocket route: PC commands go to the action agent, everything else to
+the conversation engine.
 """
 import asyncio
 import json
@@ -9,7 +10,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.websocket_manager import manager
 from core.conversation.engine import ConversationEngine
-from plugins.plugin_loader import dispatch as plugin_dispatch
+from core.actions.agent import ActionAgent
+from core.voice.elevenlabs_tts import synthesise, tts_backend
 
 logger = logging.getLogger(__name__)
 router  = APIRouter()
@@ -24,10 +26,24 @@ def _greeting() -> str:
 _engines: dict = {}
 
 
+# Browsers don't apply CORS to WebSockets, so any website you visit could
+# otherwise connect to ws://127.0.0.1:8000 and drive your PC through Yashi.
+ALLOWED_ORIGINS = {
+    "http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:4173", "http://127.0.0.1:4173",
+    "http://localhost:8000", "http://127.0.0.1:8000",                 # desktop app
+}
+
+
 @router.websocket("/ws/chat/{client_id}")
 async def chat_ws(websocket: WebSocket, client_id: str):
+    origin = websocket.headers.get("origin")
+    if origin not in ALLOWED_ORIGINS:
+        logger.warning("Refused chat socket from origin %r", origin)
+        await websocket.close(code=1008)
+        return
     await manager.connect(client_id, websocket)
     engine = ConversationEngine()
+    agent = ActionAgent()
     _engines[client_id] = engine
     active_task = None
 
@@ -79,18 +95,24 @@ async def chat_ws(websocket: WebSocket, client_id: str):
                     })
                     continue
 
-                # ── Plugin dispatch ───────────────────────────────────────────
+                # ── PC commands ───────────────────────────────────────────────
                 try:
-                    pr = await plugin_dispatch(user_text, {"session_id": engine.session_id})
-                    if pr.get("success") and pr.get("message"):
-                        await manager.send(client_id, {
-                            "type":    "plugin_response",
-                            "plugin":  pr.get("data", {}),
-                            "message": pr["message"],
-                        })
-                        continue
-                except Exception as pe:
-                    logger.warning("Plugin error: %s", pe)
+                    reply = await agent.handle(user_text)
+                except Exception:
+                    logger.exception("Action agent failed")
+                    reply = None
+                if reply:
+                    # Her real voice for action replies too, not the browser's robot voice.
+                    audio = None
+                    if tts_backend() == "elevenlabs":
+                        try:
+                            path = await synthesise(reply, "happy")
+                            audio = path.name if path else None
+                        except Exception:
+                            logger.warning("TTS for action reply failed", exc_info=True)
+                    await manager.send(client_id, {"type": "plugin_response", "message": reply,
+                                                   "audio_path": audio})
+                    continue
 
                 # ── Conversation pipeline ─────────────────────────────────────
                 active_task = asyncio.create_task(run_pipeline(user_text))

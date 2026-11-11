@@ -1133,6 +1133,11 @@ function App({ active = true }) {
         if (!greetedRef.current) {
           greetedRef.current = true;
           addMessage("bot", data.message, "neutral");
+          // The desktop app opens with ?mic=1: start listening as soon as
+          // Yashi is connected (once, not on every reconnect).
+          if (new URLSearchParams(window.location.search).get("mic") === "1" && !micOnRef.current) {
+            toggleMic();
+          }
         }
         setStatus("ok", "Ready");
         avatarRef.current?.setThinking(false);
@@ -1232,8 +1237,13 @@ function App({ active = true }) {
         setStatus("ok", "Ready");
         addMessage("bot", data.message, "neutral");
         avatarRef.current?.triggerBounce();
-        // Speak the plugin response via browser TTS
-        if (data.message && data.message.trim()) {
+        // Her ElevenLabs voice when the backend made audio, else browser speech.
+        if (data.audio_path) {
+          const actionAudio = new Audio(`/audio/tts/${data.audio_path.replace(/.*[\\/]/, "")}`);
+          actionAudio.onerror = () => speakBrowser(data.message, "neutral");
+          ttsQueueRef.current.push(actionAudio);
+          drainTTS();
+        } else if (data.message && data.message.trim()) {
           speakBrowser(data.message, "neutral");
         }
         if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
@@ -1813,6 +1823,7 @@ function App({ active = true }) {
         >
           <Suspense fallback={null}>
           <VrmAvatar
+            closeUp={state.avatarFocus}
             ref={avatarRef}
             fallback={
               <video

@@ -53,8 +53,8 @@ Fill in `.env` — at least one brain key is required:
 
 | Variable | What it does |
 |---|---|
-| `OLLAMA_API_KEY` | Ollama Cloud — default brain (`kimi-k3`) |
-| `OLLAMA_CLOUD_MODEL` | Optional; e.g. `gemma4:31b` for faster replies |
+| `OLLAMA_API_KEY` | Ollama Cloud — default brain (`kimi-k3`, needs a paid Ollama plan) |
+| `OLLAMA_CLOUD_MODEL` | Optional; e.g. `gemma4:31b`, which works on Ollama's Free plan |
 | `ANTHROPIC_API_KEY` | Claude brain |
 | `OPENAI_API_KEY` | OpenAI brain |
 | `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, `ELEVENLABS_MODEL` | Natural voice |
@@ -65,9 +65,23 @@ Keys and models can also be set later from **Dashboard -> Brain & Keys**; they a
 same `.env` and take effect immediately.
 
 Optional: `WAKE_THRESHOLD` (default `0.007`) tunes the wake word. Lower it if she misses you,
-raise it if she wakes on her own. Restart after changing it.
+raise it if she wakes on her own. Restart after changing it. `ACTION_MODEL` picks a different
+Ollama model for planning PC commands; by default the chat model does it.
 
 ## Run
+
+### As a Windows app (everyday use)
+
+```bash
+python tools/make_shortcut.py
+```
+
+This adds **Yashi** to the Desktop and the Start Menu (pin it to the taskbar if you like). Opening
+it starts everything in one window, with no terminal: the backend runs inside the app and serves
+the built UI. If you changed the frontend code, it rebuilds itself on the next launch (needs
+Node.js only for that). Closing the window stops Yashi. Errors go to `logs/desktop.log`.
+
+### For development
 
 ```bash
 python run.py
@@ -77,10 +91,10 @@ This starts the backend API on `http://localhost:8000` **and** the app on
 **http://localhost:5173** — open that one. `Ctrl+C` stops both.
 
 - `python run.py --api-only` — backend only (then `cd frontend && npm run dev` yourself).
-- `python desktop.py` — the same app in a native window (needs `pip install pywebview`).
+- `python desktop.py` — what the shortcut runs, but with logs in the console.
 
-There is exactly one UI: the Vite app in `frontend/`. The backend never serves its own copy;
-visiting `:8000` redirects to the app.
+There is exactly one UI: the Vite app in `frontend/`. In development the backend serves no UI
+(visiting `:8000` redirects to the app); the Windows app shows the production build of the same app.
 
 ## Using Yashi
 
@@ -101,8 +115,24 @@ visiting `:8000` redirects to the app.
     instructions. Changes apply to her next reply.
   - *Brain & Keys* — paste or replace API keys (shown masked), test each provider, pick the
     active brain and model, and switch the voice.
-- **Commands** — "open notepad", "play lofi on spotify", "search the web for …", "find file
-  report.pdf". Ordinary sentences always go to the conversation, not to commands.
+- **PC control** — just ask, by voice or text. Yashi's brain picks the actions; normal chat is
+  never slowed down (only command-like messages are planned, ~2k tokens each).
+  - Apps & windows: "open WhatsApp", "close Notepad", "switch to VS Code", "minimize Chrome",
+    "open notepad and type hello", "press ctrl+s".
+  - Web (your default browser): "open gmail", "google how tall is Everest", "search running shoes
+    on Amazon", "play the new MrBeast video on YouTube".
+  - Music — YouTube Music in Yashi's browser: "play Tum Hi Ho", "play a lofi playlist",
+    "play Arijit Singh", "skip", "pause", "like this song", "shuffle", "music volume 30",
+    "what's playing?".
+  - WhatsApp — WhatsApp Web in Yashi's browser: "tell Rahul I'm running late". She finds the
+    contact, reads back *"Send 'I'm running late' to Rahul Sharma?"* and sends only after you say
+    yes. If several contacts match she asks which one.
+  - System: volume up/down/mute/set, lock, screenshot, open folders/files, find files, write a
+    text file (never overwrites), shut down/restart/sleep (always asks first), time.
+- **Yashi's browser** — a separate Chrome window with its own profile (`data/yashi-browser`).
+  First time: scan the WhatsApp QR code there, and sign in to YouTube Music if you want your
+  library. It stays logged in.
+- **Mic on start** — the desktop app switches the microphone on as soon as Yashi is ready.
 
 ## Configuration
 
@@ -130,6 +160,8 @@ python -m pytest tests -q
   (CORS-restricted) — it can open apps and files, so it is never exposed to your network.
   Every request that changes something must carry the app's `X-Yashi` header, so another
   website open in your browser can't silently change keys or settings.
+- The chat connection refuses other websites too, so a page you visit can't make Yashi open
+  apps or send messages. Messages and shutdowns always wait for your yes.
 - API keys are only ever shown masked in the UI.
 - Memory lives in `data/yashi.db` on your machine. Cloud brains (Ollama Cloud, Claude, OpenAI)
   and ElevenLabs receive the conversation text; speech-to-text (Whisper) runs on your PC.

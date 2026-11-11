@@ -37,7 +37,6 @@ from core.memory.database import initialize_database
 from core.llm.ollama_client import get_ollama_cloud_client
 from core.llm.anthropic_client import get_anthropic_client
 import config.settings as settings_mod
-from plugins.plugin_loader import load_all_plugins
 
 from app.routes.chat import router as chat_router
 from app.routes.memory_api import router as memory_router
@@ -85,9 +84,12 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("TTS backend: %s", TTS_BACKEND)
 
-    plugins = load_all_plugins()
-    logger.info("Plugins loaded: %s", [p.name for p in plugins])
-    logger.info("Yashi API ready. Open the app: %s", FRONTEND_URL)
+    from core.actions.registry import load_tools
+    logger.info("PC actions available: %d", len(load_tools()))
+    if SERVE_UI:
+        logger.info("Yashi desktop app ready (UI served from frontend/dist)")
+    else:
+        logger.info("Yashi API ready. Open the app: %s", FRONTEND_URL)
     warmup = asyncio.create_task(_warm_up())
     yield
     warmup.cancel()
@@ -176,10 +178,16 @@ app.include_router(stt_router)
 app.include_router(profile_router)
 
 
-# The backend is API-only; the one and only UI is the Vite app in frontend/.
-@app.get("/", include_in_schema=False)
-async def index():
-    return RedirectResponse(FRONTEND_URL)
+# Normally the backend is API-only and the UI is the Vite dev server. The
+# desktop app (desktop.py) instead serves the production build of that same
+# frontend/ from here, so it starts without Node and on one origin.
+UI_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+SERVE_UI = os.getenv("YASHI_SERVE_UI") == "1" and (UI_DIST / "index.html").exists()
+
+if not SERVE_UI:
+    @app.get("/", include_in_schema=False)
+    async def index():
+        return RedirectResponse(FRONTEND_URL)
 
 
 @app.get("/health")
@@ -200,3 +208,9 @@ async def health():
         "elevenlabs_key_set": bool(s.ELEVENLABS_API_KEY),
     }
     return info
+
+# Mounted last so every API route above wins. StaticFiles refuses paths that
+# escape UI_DIST, and html=True serves index.html for "/".
+if SERVE_UI:
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/", StaticFiles(directory=UI_DIST, html=True), name="ui")
