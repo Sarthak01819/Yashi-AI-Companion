@@ -24,7 +24,9 @@ const VrmAvatar = forwardRef(function VrmAvatar(
   // Wardrobe: which model file to show, and the colour her clothes are tinted.
   const outfitRef = useRef({ modelUrl, clothTint });
   outfitRef.current = { modelUrl, clothTint };
-  const wardrobe = useRef(null);       // { showModel, applyTint, shownUrl } once the scene exists
+  // Scene hooks for code outside the effect, set once the scene exists:
+  // { showModel, applyTint, shownUrl, resetPose }
+  const controls = useRef(null);
 
   // Mutable animation state, read every frame (no React re-renders).
   const live = useRef({
@@ -86,6 +88,10 @@ const VrmAvatar = forwardRef(function VrmAvatar(
       live.current.speaking = false;
       live.current.analyser = null;
     },
+    // Undo the user's drag: ease her back upright and facing the viewer.
+    resetPose() {
+      controls.current?.resetPose();
+    },
   });
 
   // Dev-only handle for poking expressions from the console.
@@ -104,8 +110,10 @@ const VrmAvatar = forwardRef(function VrmAvatar(
     let vrm = null;
     let motion = null;
     const baseTurn = new THREE.Quaternion();   // model's own facing after load (VRM 0.x is turned 180°)
-    let shownUrl = null;
+    let wantedUrl = null;     // the newest outfit asked for
+    let shownUrl = null;      // the file actually on stage (the default, if wantedUrl failed)
     let loads = 0;            // the newest outfit choice wins if several are loading
+    let pending = false;      // a model is loading; it applies the latest tint when it lands
 
     let renderer;
     try {
@@ -189,8 +197,9 @@ const VrmAvatar = forwardRef(function VrmAvatar(
     const spin = {
       turn: new THREE.Quaternion(),     // the user's rotation, about `pivot`
       velocity: new THREE.Vector3(),    // world axis * rad/s, for the glide after a flick
-      dragging: false, resetting: false, lastX: 0, lastY: 0, lastT: 0, moved: 0,
+      dragging: false, pointerId: null, resetting: false, lastX: 0, lastY: 0, lastT: 0, moved: 0,
     };
+    const MAX_SPIN = 25;                        // rad/s: a hard flick still glides, never whirls
     const turnAxis = new THREE.Vector3();
     const turnStep = new THREE.Quaternion();
     const upright = new THREE.Quaternion();
@@ -202,7 +211,11 @@ const VrmAvatar = forwardRef(function VrmAvatar(
     mount.style.cursor = "grab";
     function onDown(event) {
       if (event.button !== undefined && event.button !== 0) return;
+      // One finger turns her; a second one is ignored. (A mouse has only one pointer,
+      // so a new press always starts a fresh drag, even if a release was missed.)
+      if (spin.dragging && event.pointerType !== "mouse") return;
       spin.dragging = true;
+      spin.pointerId = event.pointerId;
       spin.resetting = false;
       spin.moved = 0;
       spin.velocity.set(0, 0, 0);
@@ -213,7 +226,7 @@ const VrmAvatar = forwardRef(function VrmAvatar(
       mount.style.cursor = "grabbing";
     }
     function onDrag(event) {
-      if (!spin.dragging) return;
+      if (!spin.dragging || event.pointerId !== spin.pointerId) return;
       const now = performance.now();
       const dx = event.clientX - spin.lastX;
       const dy = event.clientY - spin.lastY;
@@ -224,15 +237,16 @@ const VrmAvatar = forwardRef(function VrmAvatar(
       const angle = (length / Math.max(200, mount.clientWidth)) * Math.PI * 2;
       turnAxis.set(dy / length, dx / length, 0).applyQuaternion(camera.quaternion);
       turnBy(turnAxis, angle);
-      spin.velocity.copy(turnAxis).multiplyScalar(angle / dt);
+      spin.velocity.copy(turnAxis).multiplyScalar(Math.min(angle / dt, MAX_SPIN));
       spin.moved += length;
       spin.lastX = event.clientX;
       spin.lastY = event.clientY;
       spin.lastT = now;
     }
-    function onUp() {
-      if (!spin.dragging) return;
+    function onUp(event) {
+      if (!spin.dragging || event.pointerId !== spin.pointerId) return;
       spin.dragging = false;
+      spin.pointerId = null;
       mount.style.cursor = "grab";
       if (performance.now() - spin.lastT > 80) spin.velocity.set(0, 0, 0);   // held still before letting go
     }
@@ -253,6 +267,7 @@ const VrmAvatar = forwardRef(function VrmAvatar(
     mount.addEventListener("pointermove", onDrag);
     mount.addEventListener("pointerup", onUp);
     mount.addEventListener("pointercancel", onUp);
+    mount.addEventListener("lostpointercapture", onUp);
     mount.addEventListener("click", onClickCapture, true);
     mount.addEventListener("dblclick", onDoubleClick);
 
@@ -260,23 +275,39 @@ const VrmAvatar = forwardRef(function VrmAvatar(
       const loader = new GLTFLoader();
       loader.register((parser) => new VRMLoaderPlugin(parser));
       const [url, ...rest] = urls;
-      return loader.loadAsync(url).catch((error) => {
-        if (rest.length) return loadModel(rest);
-        throw error;
-      });
+      return loader.loadAsync(url)
+        .then((gltf) => {
+          // A plain glTF (e.g. a renamed .glb) loads fine but has no VRM: treat it as a failure.
+          if (gltf.userData.vrm) return { gltf, url };
+          VRMUtils.deepDispose(gltf.scene);
+          throw new Error(`${url} is not a VRM model`);
+        })
+        .catch((error) => {
+          if (rest.length) return loadModel(rest);
+          throw error;
+        });
     }
 
     // Loads a model and swaps it in once it's ready, so changing outfits never
     // shows an empty stage. A file that fails falls back to the default model.
     function showModel(url) {
-      shownUrl = url;
+      wantedUrl = url;
+      if (url === shownUrl) {                 // already on stage (e.g. after a fallback)
+        loads += 1;                           // drop any load still in flight
+        pending = false;
+        applyTint();
+        return;
+      }
       const load = ++loads;
+      pending = true;
       loadModel(url === DEFAULT_MODEL ? [url] : [url, DEFAULT_MODEL])
-        .then((gltf) => {
+        .then(({ gltf, url: loadedUrl }) => {
           if (disposed || load !== loads) {           // a newer choice replaced this one
             VRMUtils.deepDispose(gltf.scene);
             return;
           }
+          pending = false;
+          shownUrl = loadedUrl;
           const next = gltf.userData.vrm;
           VRMUtils.removeUnnecessaryVertices(gltf.scene);
           VRMUtils.combineSkeletons(gltf.scene);
@@ -303,11 +334,19 @@ const VrmAvatar = forwardRef(function VrmAvatar(
           applyTint();
           frameCamera();
           placeCamera();                       // headY changed: re-aim right away
+          // Start in the pose she's being held at and settle the hair/skirt physics
+          // there, so a model swapped in while she's turned doesn't whip on frame one.
+          vrm.scene.quaternion.multiplyQuaternions(spin.turn, baseTurn);
+          vrm.scene.position.copy(pivot).sub(offset.copy(pivot).applyQuaternion(spin.turn));
+          vrm.scene.updateMatrixWorld(true);
+          vrm.springBoneManager?.reset();
           setStatus("ready");
         })
         .catch((error) => {
           console.warn("[Yashi avatar] could not load a VRM model", error);
-          if (!disposed && !vrm) setStatus("failed");
+          if (disposed || load !== loads) return;     // superseded: the newer load decides
+          pending = false;
+          if (!vrm) setStatus("failed");
         });
     }
 
@@ -328,7 +367,13 @@ const VrmAvatar = forwardRef(function VrmAvatar(
       });
     }
 
-    wardrobe.current = { showModel, applyTint, shownUrl: () => shownUrl };
+    controls.current = {
+      showModel,
+      // While a model loads, the new tint waits for it (it's applied when the model lands).
+      applyTint: () => { if (!pending) applyTint(); },
+      wantedUrl: () => wantedUrl,
+      resetPose: onDoubleClick,
+    };
     showModel(outfitRef.current.modelUrl);
 
     const clock = new THREE.Clock();
@@ -396,13 +441,14 @@ const VrmAvatar = forwardRef(function VrmAvatar(
 
     return () => {
       disposed = true;
-      wardrobe.current = null;
+      controls.current = null;
       cancelAnimationFrame(frame);
       window.removeEventListener("pointermove", onPointerMove);
       mount.removeEventListener("pointerdown", onDown);
       mount.removeEventListener("pointermove", onDrag);
       mount.removeEventListener("pointerup", onUp);
       mount.removeEventListener("pointercancel", onUp);
+      mount.removeEventListener("lostpointercapture", onUp);
       mount.removeEventListener("click", onClickCapture, true);
       mount.removeEventListener("dblclick", onDoubleClick);
       if (vrm) {
@@ -416,17 +462,18 @@ const VrmAvatar = forwardRef(function VrmAvatar(
 
   // Outfit changes: swap the model file, or just recolour the one on stage.
   useEffect(() => {
-    const current = wardrobe.current;
+    const current = controls.current;
     if (!current) return;
-    if (current.shownUrl() !== modelUrl) current.showModel(modelUrl);
+    if (current.wantedUrl() !== modelUrl) current.showModel(modelUrl);
     else current.applyTint();
   }, [modelUrl, clothTint]);
 
-  if (status === "failed") return fallback;
-
+  // The mount (and its canvas) stays in the DOM even when showing the fallback, so a
+  // later outfit that does load has somewhere to render.
   return (
     <div className={`relative h-full w-full ${className}`}>
-      <div className="h-full w-full" ref={mountRef} />
+      <div className={status === "failed" ? "hidden" : "h-full w-full"} ref={mountRef} />
+      {status === "failed" ? fallback : null}
       {status === "loading" ? (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs tracking-[0.08em] text-[#f3d6db] uppercase">
           Waking Yashi up...

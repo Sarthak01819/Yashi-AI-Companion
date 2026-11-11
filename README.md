@@ -107,8 +107,10 @@ There is exactly one UI: the Vite app in `frontend/`. In development the backend
 - **Reactions** — click Yashi for a headpat; *Tease* makes her pout, *Cheer* makes her light up.
 - **Focus** — full-screen stage with the chat floating on top; the arrow tab hides the chat so
   only Yashi is on screen, and brings it back.
+- **Resize** — on a wide screen, drag the handle between Yashi and the chat to give either side
+  more room (arrow keys work too); double-click it for half and half. The width is remembered.
 - **Rotate** — grab Yashi and drag in any direction to turn her any way; she keeps drifting a
-  little after you let go. Double-click to reset.
+  little after you let go. Press *Reset* (or double-click her) to stand her up again.
 - **Wardrobe** — the button next to *Focus*. Built-in looks (Crimson, Midnight, Sakura,
   Lavender, Mint, Sky) recolour her clothes; your pick is remembered. To add real outfits, open
   her in [VRoid Studio](https://vroid.com/en/studio), change the clothes, export a `.vrm` into

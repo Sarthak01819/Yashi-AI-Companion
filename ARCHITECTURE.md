@@ -80,6 +80,7 @@ frontend/
                               lip-sync, expressions, reactions
   src/voice/whisperListener.js  mic capture + voice-activity detection -> /api/stt
   src/ui/motion.js        GSAP helpers (entrances, hearts, meter, sheet, mic level ring)
+  src/ui/Splitter.jsx     drag handle sizing the stage vs. chat (CSS var --stage-w, remembered)
   public/models/AvatarSample_A.vrm, public/models/outfits.json (extra outfit VRMs),
   public/yashi-avatar.mp4 (WebGL fallback)
 tests/test_all.py         unit tests (emotion, cognition, safety, prompt, security, desktop UI path)
@@ -192,13 +193,17 @@ browser voice. Files are cached by text + emotion + voice in `data/tts_cache/`.
   perpendicular to the drag, accumulated in a quaternion on top of the model's base rotation, so
   any orientation is reachable. She turns about the camera's aim point, keeps some momentum
   after release, and the camera backs off when her feet swing towards the lens. A drag over
-  6 px suppresses the click (so it isn't a headpat); double-click slerps back upright.
+  6 px suppresses the click (so it isn't a headpat); double-click or the Reset button
+  (`resetPose()` on the avatar handle) slerps back upright. Only the first pointer drives a
+  drag (a second finger is ignored) and the glide speed is capped.
   Rendering pauses while the chat view is hidden behind the dashboard.
 - Wardrobe: VRoid bakes every garment into one `..._CLOTH` material merged with the body, so
   single pieces can't be removed. Built-in looks multiply that material's MToon `color` and
   `shadeColorFactor` by a tint (originals kept in `userData`); other outfits are whole VRMs from
   `public/models/outfits.json`, swapped in place (old model disposed, stale loads dropped, falls
-  back to the default model if one fails to load).
+  back to the default model if one fails to load or isn't a VRM; the canvas stays mounted
+  under the video fallback so a later outfit can still appear; the new model starts in the
+  current pose with its spring bones reset).
 - The camera frames by visible height and re-checks the container size every frame, so the
   stage, focus mode and phones all frame correctly.
 

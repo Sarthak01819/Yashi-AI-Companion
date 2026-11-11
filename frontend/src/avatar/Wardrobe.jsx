@@ -12,7 +12,9 @@ export default function Wardrobe({ outfits, current, onChoose }) {
       if (!boxRef.current?.contains(event.target)) setOpen(false);
     }
     function onKey(event) {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key !== "Escape") return;
+      event.stopPropagation();          // close only the menu, not focus mode as well
+      setOpen(false);
     }
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKey);
@@ -35,7 +37,7 @@ export default function Wardrobe({ outfits, current, onChoose }) {
       </button>
       {open ? (
         <div
-          className="absolute right-0 top-[calc(100%+8px)] z-20 w-60 border border-white/15 bg-black/85 p-2.5 shadow-[0_12px_32px_rgba(0,0,0,0.5)] backdrop-blur"
+          className="yashi-scrollbar absolute right-0 top-[calc(100%+8px)] z-20 max-h-[calc(44vh-4.5rem)] w-60 overflow-y-auto border border-white/15 bg-black/85 p-2.5 shadow-[0_12px_32px_rgba(0,0,0,0.5)] backdrop-blur min-[900px]:max-h-[calc(100vh-6rem)]"
           role="menu"
         >
           <div className="px-0.5 pb-2 text-[0.6rem] font-bold uppercase tracking-[0.28em] text-white/45">Outfit</div>

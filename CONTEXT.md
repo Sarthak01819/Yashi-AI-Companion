@@ -69,6 +69,8 @@ being an AI when sincerely asked, and keep personal data on the user's machine.
   Origin check; removed `plugins/`.
 - **Free rotation & wardrobe** — trackball rotation on any axis with momentum; Wardrobe picker
   with cloth recolours and swappable outfit VRMs listed in `outfits.json`.
+- **Resizable stage** — drag handle between Yashi and the chat (default half and half,
+  remembered); the chat header's buttons wrap as one row.
 
 ## Known limitations
 

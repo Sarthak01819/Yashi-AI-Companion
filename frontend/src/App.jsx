@@ -2,6 +2,7 @@ import { lazy, startTransition, Suspense, useEffect, useReducer, useRef, useStat
 
 import { useWardrobe } from "./avatar/outfits";
 import Wardrobe from "./avatar/Wardrobe";
+import Splitter, { stageWidthCss } from "./ui/Splitter";
 import { createWhisperListener } from "./voice/whisperListener";
 import {
   createEnterAnimator,
@@ -110,6 +111,19 @@ function micErrorNote(error) {
 
 // three.js + the VRM model are big: load them after the UI paints.
 const VrmAvatar = lazy(() => import("./avatar/VrmAvatar"));
+
+// How much of a wide window Yashi's stage takes (percent); the rest is the chat.
+const STAGE_SPLIT_KEY = "yashi.stageSplit";
+const STAGE_SPLIT_DEFAULT = 50;
+
+function readStageSplit() {
+  try {
+    const saved = Number(localStorage.getItem(STAGE_SPLIT_KEY));
+    return saved >= 10 && saved <= 90 ? saved : STAGE_SPLIT_DEFAULT;
+  } catch {
+    return STAGE_SPLIT_DEFAULT;
+  }
+}
 
 const LLM_OPTIONS = [
   { id: "ollama_cloud", label: "Cloud", hint: "Kimi K3 · Ollama Cloud" },
@@ -532,6 +546,17 @@ function App({ active = true }) {
   // Focus mode: slide the chat away to see only Yashi.
   const [chatHidden, setChatHidden] = useState(false);
   const wardrobe = useWardrobe();
+  const shellRef = useRef(null);
+  const [stageSplit, setStageSplit] = useState(readStageSplit);
+
+  function changeStageSplit(value) {
+    setStageSplit(value);
+    try {
+      localStorage.setItem(STAGE_SPLIT_KEY, String(value));
+    } catch {
+      // private mode: the width just isn't remembered
+    }
+  }
 
   const stageRef = useRef(null);
   const hudRef = useRef(null);
@@ -1806,14 +1831,18 @@ function App({ active = true }) {
   const meterPercent = Math.round(((state.valence + 1) / 2) * 100);
 
   return (
-    <div className="relative flex h-screen flex-col overflow-hidden bg-yashi-shell text-[#2b1a1d] min-[900px]:flex-row">
+    <div
+      className="relative flex h-screen flex-col overflow-hidden bg-yashi-shell text-[#2b1a1d] min-[900px]:flex-row"
+      ref={shellRef}
+      style={{ "--stage-w": stageWidthCss(stageSplit) }}
+    >
       {/* ── Stage: Yashi on black, VN-style nameplate and HUD ─────────────── */}
       <section
         className={cx(
-          "relative shrink-0 overflow-hidden bg-black",
+          "@container relative shrink-0 overflow-hidden bg-black",
           state.avatarFocus
             ? "h-screen w-full"
-            : "h-[44vh] w-full min-[900px]:h-screen min-[900px]:w-[42%] min-[900px]:max-w-[640px]"
+            : "h-[44vh] w-full min-[900px]:h-screen min-[900px]:w-[var(--stage-w)]"
         )}
         ref={stageRef}
       >
@@ -1917,7 +1946,16 @@ function App({ active = true }) {
           ) : null}
         </div>
 
-        <div className="absolute right-4 top-5 flex items-start gap-2">
+        {/* beside the nameplate, or under it when the stage is too narrow for both */}
+        <div className="absolute right-4 top-5 flex items-start gap-2 @max-[440px]:top-24">
+          <button
+            className="rounded-md border border-white/25 bg-black/50 px-3 py-1.5 text-[0.72rem] font-extrabold tracking-wide text-white transition hover:border-white"
+            onClick={() => avatarRef.current?.resetPose?.()}
+            title="Turn her back upright, facing you"
+            type="button"
+          >
+            Reset
+          </button>
           <Wardrobe current={wardrobe.outfit.id} onChoose={wardrobe.choose} outfits={wardrobe.outfits} />
           <button
             className="rounded-md border border-white/25 bg-black/50 px-3 py-1.5 text-[0.72rem] font-extrabold tracking-wide text-white transition hover:border-white"
@@ -1928,6 +1966,15 @@ function App({ active = true }) {
           </button>
         </div>
       </section>
+
+      {!state.avatarFocus ? (
+        <Splitter
+          defaultPercent={STAGE_SPLIT_DEFAULT}
+          onChange={changeStageSplit}
+          percent={stageSplit}
+          shellRef={shellRef}
+        />
+      ) : null}
 
       {/* ── Focus mode: minimize / restore the chat ──────────────────────────── */}
       {state.avatarFocus ? (
@@ -1976,17 +2023,20 @@ function App({ active = true }) {
               <span className="truncate">{state.micBar.text}</span>
             </div>
           ) : null}
-          <ChipButton onClick={newSession}>New chat</ChipButton>
-          <ChipButton active={state.wakeWordActive} onClick={toggleWakeWord}>
-            Wake word
-          </ChipButton>
-          <ChipButton onClick={() => dispatch({ type: "toggle_settings" })}>Settings</ChipButton>
-          <a
-            className="rounded-md border border-yashi-brand bg-yashi-brand px-3 py-1.5 text-[0.72rem] font-extrabold tracking-wide text-white transition hover:bg-yashi-brand-strong"
-            href="#/dashboard/profile"
-          >
-            Dashboard
-          </a>
+          {/* one group, so a narrow chat wraps the buttons as a row instead of splitting them */}
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+            <ChipButton onClick={newSession}>New chat</ChipButton>
+            <ChipButton active={state.wakeWordActive} onClick={toggleWakeWord}>
+              Wake word
+            </ChipButton>
+            <ChipButton onClick={() => dispatch({ type: "toggle_settings" })}>Settings</ChipButton>
+            <a
+              className="rounded-md border border-yashi-brand bg-yashi-brand px-3 py-1.5 text-[0.72rem] font-extrabold tracking-wide text-white transition hover:bg-yashi-brand-strong"
+              href="#/dashboard/profile"
+            >
+              Dashboard
+            </a>
+          </div>
         </header>
 
         <div className={cx("h-[3px] w-full bg-yashi-panel", state.volumeVisible ? "block" : "hidden")}>
