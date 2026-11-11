@@ -1,5 +1,7 @@
 import { lazy, startTransition, Suspense, useEffect, useReducer, useRef, useState } from "react";
 
+import { useWardrobe } from "./avatar/outfits";
+import Wardrobe from "./avatar/Wardrobe";
 import { createWhisperListener } from "./voice/whisperListener";
 import {
   createEnterAnimator,
@@ -529,6 +531,7 @@ function App({ active = true }) {
   const [persona, setPersona] = useState({ name: "Yashi" });
   // Focus mode: slide the chat away to see only Yashi.
   const [chatHidden, setChatHidden] = useState(false);
+  const wardrobe = useWardrobe();
 
   const stageRef = useRef(null);
   const hudRef = useRef(null);
@@ -1818,12 +1821,14 @@ function App({ active = true }) {
           aria-label="Give Yashi a headpat"
           className="absolute inset-0 block cursor-pointer"
           onClick={(event) => react("headpat", event)}
-          title="Click for a headpat · drag to spin her · double-click to face you"
+          title="Click for a headpat · drag to turn her any way · double-click to reset"
           type="button"
         >
           <Suspense fallback={null}>
           <VrmAvatar
             closeUp={state.avatarFocus}
+            clothTint={wardrobe.outfit.tint}
+            modelUrl={wardrobe.outfit.model}
             ref={avatarRef}
             fallback={
               <video
@@ -1912,13 +1917,16 @@ function App({ active = true }) {
           ) : null}
         </div>
 
-        <button
-          className="absolute right-4 top-5 rounded-md border border-white/25 bg-black/50 px-3 py-1.5 text-[0.72rem] font-extrabold tracking-wide text-white transition hover:border-white"
-          onClick={() => setAvatarFocus(!state.avatarFocus)}
-          type="button"
-        >
-          {state.avatarFocus ? "Exit focus" : "Focus"}
-        </button>
+        <div className="absolute right-4 top-5 flex items-start gap-2">
+          <Wardrobe current={wardrobe.outfit.id} onChoose={wardrobe.choose} outfits={wardrobe.outfits} />
+          <button
+            className="rounded-md border border-white/25 bg-black/50 px-3 py-1.5 text-[0.72rem] font-extrabold tracking-wide text-white transition hover:border-white"
+            onClick={() => setAvatarFocus(!state.avatarFocus)}
+            type="button"
+          >
+            {state.avatarFocus ? "Exit focus" : "Focus"}
+          </button>
+        </div>
       </section>
 
       {/* ── Focus mode: minimize / restore the chat ──────────────────────────── */}

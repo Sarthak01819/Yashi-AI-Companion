@@ -67,12 +67,16 @@ being an AI when sincerely asked, and keep personal data on the user's machine.
   icon, mic on at launch, closer focus-mode camera; PC control (apps, windows, keyboard, volume,
   power, files, web search, YouTube, YouTube Music, WhatsApp Web) with confirmations; WebSocket
   Origin check; removed `plugins/`.
+- **Free rotation & wardrobe** — trackball rotation on any axis with momentum; Wardrobe picker
+  with cloth recolours and swappable outfit VRMs listed in `outfits.json`.
 
 ## Known limitations
 
 - The Anthropic key in the original `.env` is rejected by the API (401) and the OpenAI account
   has no credit; both backends work once valid keys are added.
 - AvatarSample_A has no "surprised" expression, so *excited* shows as a happy face.
+- Built-in wardrobe looks tint all of her clothes together (cardigan, bows, socks, shoes), since
+  they share one material; different garments need an outfit VRM exported from VRoid Studio.
 - Stripping `*` also removes a literal asterisk in maths ("5 * 3"); acceptable for chat.
 - Voice emotion (`voice_energy`) is supported by the fusion engine but not yet fed from the
   Whisper path.

@@ -16,7 +16,9 @@ a natural voice, and reacts on screen — smiling, frowning, nodding, and lip-sy
 - **Dashboard**: an animated, game-style profile for you (levels, XP, streaks, daily check-ins,
   stats radar), a personality editor for Yashi (presets, trait sliders, talking style, custom
   instructions with a live preview of what she is told), and a page to set API keys and models.
-- **Grab to spin**: drag the 3D model to turn her 360°; double-click to face front again.
+- **Turn her any way**: drag the 3D model to rotate her on any axis (tip, roll or spin);
+  double-click to stand her up again.
+- **Wardrobe**: recolour her outfit with one click, or add whole new outfits as VRM files.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for how it fits together and [CONTEXT.md](CONTEXT.md) for
 project decisions and history.
@@ -105,7 +107,14 @@ There is exactly one UI: the Vite app in `frontend/`. In development the backend
 - **Reactions** — click Yashi for a headpat; *Tease* makes her pout, *Cheer* makes her light up.
 - **Focus** — full-screen stage with the chat floating on top; the arrow tab hides the chat so
   only Yashi is on screen, and brings it back.
-- **Spin** — grab Yashi and drag to rotate her; double-click to reset.
+- **Rotate** — grab Yashi and drag in any direction to turn her any way; she keeps drifting a
+  little after you let go. Double-click to reset.
+- **Wardrobe** — the button next to *Focus*. Built-in looks (Crimson, Midnight, Sakura,
+  Lavender, Mint, Sky) recolour her clothes; your pick is remembered. To add real outfits, open
+  her in [VRoid Studio](https://vroid.com/en/studio), change the clothes, export a `.vrm` into
+  `frontend/public/models/` and list it in `frontend/public/models/outfits.json`:
+  `[{ "label": "Hoodie", "file": "Yashi_hoodie.vrm", "swatch": "#e0b080" }]`.
+  Rebuild (`npm run build`) for the desktop app.
 - **Settings** — switch brain and voice, and open memory (facts, reflections) and health check.
 - **Dashboard** (`#/dashboard`, button in the top bar):
   - *My Profile* — your name, photo, motto, interests and goals (Yashi uses them in

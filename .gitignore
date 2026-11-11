@@ -48,3 +48,8 @@ data/webview/
 
 # Yashi's browser profile: holds your WhatsApp / YouTube logins
 data/yashi-browser/
+
+# Your own outfit models: free VRoid textures usually forbid redistribution, so keep them local.
+# outfits.json (just the list) and the default model stay tracked.
+frontend/public/models/*.vrm
+!frontend/public/models/AvatarSample_A.vrm

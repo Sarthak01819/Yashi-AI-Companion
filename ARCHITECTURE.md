@@ -72,12 +72,16 @@ frontend/
   src/dashboard/          Dashboard shell + ProfilePage, PersonaPage, BrainPage,
                           RadarChart, ui.jsx (sliders, count-ups, fields, icons)
   src/lib/api.js          fetch helpers (always send X-Yashi), image -> resized data URL
-  src/avatar/VrmAvatar.jsx    three.js scene, VRM loading, camera framing (lazy-loaded)
+  src/avatar/VrmAvatar.jsx    three.js scene, VRM loading/swapping, cloth tint, free rotation,
+                              camera framing (lazy-loaded)
+  src/avatar/outfits.js       built-in looks, outfits.json loader, useWardrobe() (localStorage)
+  src/avatar/Wardrobe.jsx     outfit picker on the stage
   src/avatar/avatarMotion.js  procedural animation: springs, breathing, gaze, blinks,
                               lip-sync, expressions, reactions
   src/voice/whisperListener.js  mic capture + voice-activity detection -> /api/stt
   src/ui/motion.js        GSAP helpers (entrances, hearts, meter, sheet, mic level ring)
-  public/models/AvatarSample_A.vrm, public/yashi-avatar.mp4 (WebGL fallback)
+  public/models/AvatarSample_A.vrm, public/models/outfits.json (extra outfit VRMs),
+  public/yashi-avatar.mp4 (WebGL fallback)
 tests/test_all.py         unit tests (emotion, cognition, safety, prompt, security, desktop UI path)
 tests/test_actions.py     PC control: yes/no, fast path, command gate, plan validation, contacts,
                           confirm-before-send, WebSocket Origin check
@@ -184,9 +188,17 @@ browser voice. Files are cached by text + emotion + voice in `data/tts_cache/`.
   have follow-through) -> gaze (slow attention + saccades) -> blinks (incl. double blinks) ->
   lip-sync (envelope follower, new viseme per syllable) -> expressions (eased).
 - Reactions (`headpat`, `tease`, `cheer`) temporarily override the face and kick the head springs.
-- Drag to rotate: a turntable yaw on top of the model's base yaw, with inertia; a drag over
-  6 px suppresses the click (so it isn't a headpat); double-click springs back to the front.
+- Free rotation (trackball): each drag turns the model about the camera-space axis
+  perpendicular to the drag, accumulated in a quaternion on top of the model's base rotation, so
+  any orientation is reachable. She turns about the camera's aim point, keeps some momentum
+  after release, and the camera backs off when her feet swing towards the lens. A drag over
+  6 px suppresses the click (so it isn't a headpat); double-click slerps back upright.
   Rendering pauses while the chat view is hidden behind the dashboard.
+- Wardrobe: VRoid bakes every garment into one `..._CLOTH` material merged with the body, so
+  single pieces can't be removed. Built-in looks multiply that material's MToon `color` and
+  `shadeColorFactor` by a tint (originals kept in `userData`); other outfits are whole VRMs from
+  `public/models/outfits.json`, swapped in place (old model disposed, stale loads dropped, falls
+  back to the default model if one fails to load).
 - The camera frames by visible height and re-checks the container size every frame, so the
   stage, focus mode and phones all frame correctly.
 
